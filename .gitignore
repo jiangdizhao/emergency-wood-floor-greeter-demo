@@ -25,3 +25,4 @@ Thumbs.db
 
 # all temporary files
 *.pyc
+backend/app/__pycache__/
