@@ -22,3 +22,6 @@ dist/
 Thumbs.db
 .vscode/
 .idea/
+
+# all temporary files
+*.pyc
