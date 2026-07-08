@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+from typing import Any
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse
 
 from .models import (
     ChatRequest,
@@ -20,10 +24,31 @@ from .services.product_service import ProductService
 from .services.recommendation_service import RecommendationService
 from .services.state_machine import StoreSessionStateMachine
 
+
+class UTF8JSONResponse(JSONResponse):
+    """JSON response class that explicitly declares UTF-8 for Windows PowerShell.
+
+    JSON is UTF-8 by default, but some Windows PowerShell versions decode
+    application/json without a charset incorrectly. The explicit charset keeps
+    Chinese product names readable in Invoke-RestMethod / Invoke-WebRequest.
+    """
+
+    media_type = "application/json; charset=utf-8"
+
+    def render(self, content: Any) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+
 app = FastAPI(
     title="Emergency Wood Floor Greeter Demo API",
     version="0.1.0",
     description="Backend for the 2-day wood-floor retail AI greeter demo.",
+    default_response_class=UTF8JSONResponse,
 )
 
 app.add_middleware(
