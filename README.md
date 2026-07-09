@@ -7,6 +7,7 @@
 - voice/wave greeting trigger API
 - deterministic product recommendation
 - simulated customer profile / lead save
+- real OpenCV + MediaPipe vision service for face-close and wave greeting detection
 
 ## Backend quick start
 
@@ -17,13 +18,54 @@ python -m pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
+If you previously installed the older vision dependencies, reinstall these pinned versions:
+
+```powershell
+python -m pip install --upgrade --force-reinstall -r requirements.txt
+```
+
 Open:
 
 - API root: http://127.0.0.1:8000/
 - Health: http://127.0.0.1:8000/api/health
 - Docs: http://127.0.0.1:8000/docs
+- Vision stream: http://127.0.0.1:8000/api/vision/stream
+- Vision status: http://127.0.0.1:8000/api/vision/status
 - UTF-8 JSON debug: http://127.0.0.1:8000/api/debug/encoding
 - UTF-8 plain-text debug: http://127.0.0.1:8000/api/debug/plain-utf8
+
+## Vision service
+
+The backend owns the camera. The frontend should display the MJPEG stream from `/api/vision/stream`; it should not open the camera directly.
+
+Endpoints:
+
+- `POST /api/vision/start`
+- `POST /api/vision/stop`
+- `GET /api/vision/status`
+- `GET /api/vision/stream`
+
+Vision smoke test:
+
+```powershell
+cd F:\emergency-wood-floor-greeter-demo\backend
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke_test_vision.ps1
+```
+
+Expected flow:
+
+1. Start the vision service.
+2. Open http://127.0.0.1:8000/api/vision/stream in a browser.
+3. Move close to the camera; status should become `PERSON_CLOSE_WAITING_GREETING`.
+4. Wave left/right; status should become `GREETING_RECEIVED`.
+
+Manual vision commands:
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/vision/start" -Method Post
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/vision/status" -Method Get | ConvertTo-Json -Depth 10
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/vision/stop" -Method Post
+```
 
 ## Windows PowerShell notes
 
@@ -134,4 +176,4 @@ curl.exe -X POST "http://127.0.0.1:8000/api/greeting/voice" `
 
 ## Current implementation status
 
-The backend is runnable. `/api/vision/status` is currently simulated so the backend does not depend on camera drivers during startup. The next step is to attach the real OpenCV + MediaPipe vision service.
+The backend is runnable and includes a real OpenCV + MediaPipe vision service. The service detects face-close status and hand-wave greetings, then updates the backend state machine. The next step is to build the frontend retail demo UI.
