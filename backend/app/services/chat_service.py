@@ -10,15 +10,30 @@ class ChatService:
         self.product_service = product_service
         self.recommendation_service = recommendation_service
 
+    def detect_language(self, text: str) -> str:
+        ascii_letters = sum(1 for ch in text if ch.isascii() and ch.isalpha())
+        cjk_chars = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+        return "en" if ascii_letters > cjk_chars else "zh"
+
     def is_greeting(self, text: str) -> bool:
         normalized = text.lower().replace(" ", "")
-        return any(k in normalized for k in ["你好", "您好", "hi", "hello", "hey", "嗨", "介绍一下", "有人吗"])
+        english = text.lower()
+        return any(
+            k in normalized
+            for k in ["你好", "您好", "hi", "hello", "hey", "嗨", "介绍一下", "有人吗"]
+        ) or any(k in english for k in ["good morning", "good afternoon", "good evening", "can you help"])
 
     def is_session_end(self, text: str) -> bool:
         normalized = text.lower().replace(" ", "")
-        return any(k in normalized for k in ["再见", "结束", "谢谢", "不用了", "bye", "goodbye"])
+        return any(k in normalized for k in ["再见", "结束", "谢谢", "不用了", "bye", "goodbye", "thanks", "thankyou"])
 
-    def build_welcome_message(self) -> str:
+    def build_welcome_message(self, text: str = "") -> str:
+        if self.detect_language(text) == "en":
+            return (
+                "Hello, welcome to the wood flooring experience area. I can help you compare materials, colors, "
+                "wear resistance, waterproof performance, floor-heating compatibility, and maintenance. You can ask me "
+                "questions like: which floor is better for pets, which one supports underfloor heating, or which option is best for a limited budget."
+            )
         return (
             "你好，欢迎来到木地板体验区。我可以帮你了解不同木地板的材质、颜色、耐磨、防水和地暖适配情况。"
             "你可以直接问我，比如：家里有宠物怎么选，哪种适合地暖，或者预算有限应该怎么选。"
@@ -31,33 +46,52 @@ class ChatService:
         recommended_products: list[FlooringProduct],
     ) -> str:
         text = user_text.lower().replace(" ", "")
+        english = user_text.lower()
+        lang = self.detect_language(user_text)
 
-        if any(k in text for k in ["对比", "区别", "哪个好"]):
-            return self._answer_comparison(recommended_products)
+        if any(k in text for k in ["对比", "区别", "哪个好"]) or any(
+            k in english for k in ["compare", "difference", "which is better", "better"]
+        ):
+            return self._answer_comparison(recommended_products, lang)
 
-        if any(k in text for k in ["防水", "怕水", "潮湿", "回南天"]):
-            return self._answer_waterproof(recommended_products, customer_profile)
+        if any(k in text for k in ["防水", "怕水", "潮湿", "回南天"]) or any(
+            k in english for k in ["waterproof", "water resistant", "humid", "damp", "moisture", "wet"]
+        ):
+            return self._answer_waterproof(recommended_products, customer_profile, lang)
 
-        if any(k in text for k in ["地暖", "地热", "采暖"]):
-            return self._answer_floor_heating(recommended_products, customer_profile)
+        if any(k in text for k in ["地暖", "地热", "采暖"]) or any(
+            k in english for k in ["floor heating", "underfloor heating", "radiant heating"]
+        ):
+            return self._answer_floor_heating(recommended_products, customer_profile, lang)
 
-        if any(k in text for k in ["宠物", "猫", "狗", "好打理", "好清洁"]):
-            return self._answer_pet_friendly(recommended_products, customer_profile)
+        if any(k in text for k in ["宠物", "猫", "狗", "好打理", "好清洁"]) or any(
+            k in english for k in ["pet", "pets", "cat", "dog", "easy to clean", "easy clean", "maintenance"]
+        ):
+            return self._answer_pet_friendly(recommended_products, customer_profile, lang)
 
-        if any(k in text for k in ["预算", "便宜", "多少钱", "价格", "性价比"]):
-            return self._answer_budget(recommended_products, customer_profile)
+        if any(k in text for k in ["预算", "便宜", "多少钱", "价格", "性价比"]) or any(
+            k in english for k in ["budget", "cheap", "affordable", "price", "cost", "cost-effective"]
+        ):
+            return self._answer_budget(recommended_products, customer_profile, lang)
 
         if recommended_products:
             main = recommended_products[0]
             backup = recommended_products[1] if len(recommended_products) > 1 else None
-            answer = (
-                f"根据您目前的需求，我会优先推荐{main.name}。它的主要优势是{self._points(main)}。"
-            )
+            if lang == "en":
+                answer = f"Based on your current needs, I would first recommend {main.name}. Its main advantages are {self._points(main, lang)}."
+                if backup:
+                    answer += f" As a backup, you can also consider {backup.name}, especially if you prefer a {backup.price_range} price range or {backup.color} tone."
+                answer += self._next_question(customer_profile, lang)
+                return answer
+
+            answer = f"根据您目前的需求，我会优先推荐{main.name}。它的主要优势是{self._points(main, lang)}。"
             if backup:
                 answer += f" 备选可以看{backup.name}，它更适合对{backup.price_range}预算或{backup.color}风格有偏好的客户。"
-            answer += self._next_question(customer_profile)
+            answer += self._next_question(customer_profile, lang)
             return answer
 
+        if lang == "en":
+            return "I can help you choose flooring based on room type, style, budget, waterproof needs, floor heating, pets, children, and elderly family members. Is it mainly for the living room, bedroom, or the whole home?"
         return "我可以帮您从房间类型、装修风格、预算、防水、地暖、宠物和老人儿童这些方面来选地板。您可以先告诉我主要铺在客厅还是卧室？"
 
     def build_conversation_summary(self, profile: CustomerProfile) -> str:
@@ -86,46 +120,66 @@ class ChatService:
             return "建议销售继续确认" + "、".join(missing) + "，再给出正式报价和安装建议。"
         return "建议销售在 24 小时内发送主推款与备选款对比方案，并确认面积、安装时间和最终预算。"
 
-    def _answer_waterproof(self, products: list[FlooringProduct], profile: CustomerProfile) -> str:
+    def _answer_waterproof(self, products: list[FlooringProduct], profile: CustomerProfile, lang: str) -> str:
         waterproof = [p for p in products if p.waterproof] or [p for p in self.product_service.list_products() if p.waterproof]
         if waterproof:
             p = waterproof[0]
-            return f"如果您比较关注防水，我会优先推荐{p.name}。它属于{p.type}地板，防水和日常清洁表现更好，适合厨房外侧、客厅或潮湿环境。最终安装仍要注意收边和基层防潮。{self._next_question(profile)}"
-        return "目前模拟产品库里没有标记为强防水的产品。一般来说，SPC 会比实木更适合潮湿环境。"
+            if lang == "en":
+                return f"If waterproof performance is important, I would first recommend {p.name}. It is a {p.type} floor with better water resistance and easier daily cleaning, suitable for living rooms or humid environments. Final installation still needs proper edge sealing and moisture treatment. {self._next_question(profile, lang)}"
+            return f"如果您比较关注防水，我会优先推荐{p.name}。它属于{p.type}地板，防水和日常清洁表现更好，适合厨房外侧、客厅或潮湿环境。最终安装仍要注意收边和基层防潮。{self._next_question(profile, lang)}"
+        return "SPC is usually more suitable than solid wood for humid areas." if lang == "en" else "目前模拟产品库里没有标记为强防水的产品。一般来说，SPC 会比实木更适合潮湿环境。"
 
-    def _answer_floor_heating(self, products: list[FlooringProduct], profile: CustomerProfile) -> str:
+    def _answer_floor_heating(self, products: list[FlooringProduct], profile: CustomerProfile, lang: str) -> str:
         suitable = [p for p in products if p.floor_heating] or [p for p in self.product_service.list_products() if p.floor_heating]
         if suitable:
             p = suitable[0]
-            return f"地暖场景建议看稳定性更好的产品，例如{p.name}。它标记为支持地暖，铺装时还需要确认地面找平、含水率和温控条件。{self._next_question(profile)}"
-        return "可以选地暖适配产品，但需要销售进一步确认安装环境、辅材和温控要求。"
+            if lang == "en":
+                return f"For underfloor heating, I would suggest a product with better dimensional stability, such as {p.name}. It is marked as floor-heating compatible, but the store should still confirm leveling, moisture content, and temperature-control requirements. {self._next_question(profile, lang)}"
+            return f"地暖场景建议看稳定性更好的产品，例如{p.name}。它标记为支持地暖，铺装时还需要确认地面找平、含水率和温控条件。{self._next_question(profile, lang)}"
+        return "Please choose a floor-heating compatible product and confirm installation details with sales." if lang == "en" else "可以选地暖适配产品，但需要销售进一步确认安装环境、辅材和温控要求。"
 
-    def _answer_pet_friendly(self, products: list[FlooringProduct], profile: CustomerProfile) -> str:
+    def _answer_pet_friendly(self, products: list[FlooringProduct], profile: CustomerProfile, lang: str) -> str:
         suitable = [p for p in products if p.pet_friendly] or [p for p in self.product_service.list_products() if p.pet_friendly]
         if suitable:
             p = suitable[0]
-            return f"家里有宠物的话，我建议优先看{p.name}。它更耐磨，也更容易清洁，日常爪痕和水渍维护压力会小一些。{self._next_question(profile)}"
-        return "宠物家庭建议优先考虑耐磨等级高、好清洁的 SPC 或强化地板。"
+            if lang == "en":
+                return f"For a home with pets, I recommend {p.name} first. It is more wear-resistant and easier to clean, so daily scratches and water marks are easier to manage. {self._next_question(profile, lang)}"
+            return f"家里有宠物的话，我建议优先看{p.name}。它更耐磨，也更容易清洁，日常爪痕和水渍维护压力会小一些。{self._next_question(profile, lang)}"
+        return "For pets, prioritize SPC or laminate flooring with high wear resistance and easy cleaning." if lang == "en" else "宠物家庭建议优先考虑耐磨等级高、好清洁的 SPC 或强化地板。"
 
-    def _answer_budget(self, products: list[FlooringProduct], profile: CustomerProfile) -> str:
+    def _answer_budget(self, products: list[FlooringProduct], profile: CustomerProfile, lang: str) -> str:
         economic = [p for p in products if p.price_range in {"经济", "中等"}] or [p for p in self.product_service.list_products() if p.price_range in {"经济", "中等"}]
         if economic:
             p = economic[0]
-            return f"如果希望控制预算，可以先看{p.name}，它的价格区间是{p.price_range}，同时保留了比较实用的耐磨和维护优势。{self._next_question(profile)}"
-        return "预算有限时通常优先比较强化地板和部分 SPC 产品，性价比会更高。"
+            if lang == "en":
+                return f"If you want to control the budget, you can start with {p.name}. Its price range is {p.price_range}, while still keeping practical wear resistance and maintenance advantages. {self._next_question(profile, lang)}"
+            return f"如果希望控制预算，可以先看{p.name}，它的价格区间是{p.price_range}，同时保留了比较实用的耐磨和维护优势。{self._next_question(profile, lang)}"
+        return "For a limited budget, laminate and some SPC products are usually more cost-effective." if lang == "en" else "预算有限时通常优先比较强化地板和部分 SPC 产品，性价比会更高。"
 
-    def _answer_comparison(self, products: list[FlooringProduct]) -> str:
+    def _answer_comparison(self, products: list[FlooringProduct], lang: str) -> str:
         if len(products) >= 2:
             a, b = products[0], products[1]
-            return f"简单对比，{a.name}更突出{self._points(a)}；{b.name}更突出{self._points(b)}。如果重视防水耐磨，优先看 SPC 或强化；如果重视自然脚感和木纹质感，可以看多层实木。"
-        return "可以的。一般 SPC 更偏防水、耐磨、好打理；多层实木更偏自然脚感和真实木纹；强化地板通常性价比更高。"
+            if lang == "en":
+                return f"In simple terms, {a.name} is stronger in {self._points(a, lang)}, while {b.name} is stronger in {self._points(b, lang)}. If you care more about waterproofing and wear resistance, start with SPC or laminate. If you care more about natural feel and wood texture, consider multi-layer solid wood."
+            return f"简单对比，{a.name}更突出{self._points(a, lang)}；{b.name}更突出{self._points(b, lang)}。如果重视防水耐磨，优先看 SPC 或强化；如果重视自然脚感和木纹质感，可以看多层实木。"
+        return "SPC is usually more waterproof and easy to maintain; multi-layer solid wood gives a more natural feel; laminate is usually more cost-effective." if lang == "en" else "可以的。一般 SPC 更偏防水、耐磨、好打理；多层实木更偏自然脚感和真实木纹；强化地板通常性价比更高。"
 
     @staticmethod
-    def _points(product: FlooringProduct) -> str:
-        return "、".join(product.selling_points[:3]) if product.selling_points else "适用场景明确、维护方便"
+    def _points(product: FlooringProduct, lang: str) -> str:
+        if not product.selling_points:
+            return "clear use case and easy maintenance" if lang == "en" else "适用场景明确、维护方便"
+        return ", ".join(product.selling_points[:3]) if lang == "en" else "、".join(product.selling_points[:3])
 
     @staticmethod
-    def _next_question(profile: CustomerProfile) -> str:
+    def _next_question(profile: CustomerProfile, lang: str) -> str:
+        if lang == "en":
+            if not profile.room_type:
+                return " Is it mainly for the living room, bedroom, or the whole home?"
+            if not profile.style:
+                return " Is your home style more modern minimalist, Nordic, or Chinese style?"
+            if not profile.budget:
+                return " Is your budget more economy, medium, or premium?"
+            return " I can also help you compare two products."
         if not profile.room_type:
             return " 您主要是客厅、卧室还是全屋铺装？"
         if not profile.style:
