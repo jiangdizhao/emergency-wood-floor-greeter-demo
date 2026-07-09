@@ -9,13 +9,14 @@
 - simulated customer profile / lead save
 - real OpenCV + MediaPipe vision service for face-close and wave greeting detection
 - fullscreen React retail demo UI
-- browser Web Speech API speech recognition and SpeechSynthesis TTS
+- browser Web Speech API speech recognition
+- TTS providers: local Kokoro, OpenAI, and browser SpeechSynthesis fallback
 - language-choice prompt after greeting, with English as default
 
 ## Backend quick start
 
 ```powershell
-cd backend
+cd F:\emergency-wood-floor-greeter-demo\backend
 conda activate woodfloor
 uvicorn app.main:app --reload --port 8000
 ```
@@ -37,8 +38,61 @@ Open:
 - Docs: http://127.0.0.1:8000/docs
 - Vision stream: http://127.0.0.1:8000/api/vision/stream
 - Vision status: http://127.0.0.1:8000/api/vision/status
-- UTF-8 JSON debug: http://127.0.0.1:8000/api/debug/encoding
-- UTF-8 plain-text debug: http://127.0.0.1:8000/api/debug/plain-utf8
+- TTS status: http://127.0.0.1:8000/api/tts/status
+
+## Local Kokoro TTS quick start
+
+Run Kokoro in the separate conda environment you already tested:
+
+```powershell
+cd F:\emergency-wood-floor-greeter-demo\local_tts
+conda activate kokoro-tts
+powershell -ExecutionPolicy Bypass -File .\start_kokoro_tts.ps1
+```
+
+If the environment does not have FastAPI/Uvicorn yet:
+
+```powershell
+cd F:\emergency-wood-floor-greeter-demo\local_tts
+conda activate kokoro-tts
+python -m pip install -r requirements.txt
+```
+
+Smoke test:
+
+```powershell
+cd F:\emergency-wood-floor-greeter-demo\local_tts
+conda activate kokoro-tts
+powershell -ExecutionPolicy Bypass -File .\smoke_test_kokoro_tts.ps1
+```
+
+Then start the main backend and point it to the local Kokoro service:
+
+```powershell
+cd F:\emergency-wood-floor-greeter-demo\backend
+conda activate woodfloor
+$env:LOCAL_TTS_URL="http://127.0.0.1:8010/tts"
+$env:LOCAL_TTS_HEALTH_URL="http://127.0.0.1:8010/health"
+uvicorn app.main:app --reload --port 8000
+```
+
+Check main backend TTS status:
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/tts/status" -Method Get | ConvertTo-Json -Depth 10
+```
+
+## OpenAI TTS fallback
+
+OpenAI TTS is still supported as a fallback. Set the key only in your local PowerShell session before starting backend:
+
+```powershell
+$env:OPENAI_API_KEY="sk-your-real-key-here"
+$env:OPENAI_TTS_MODEL="gpt-4o-mini-tts"
+$env:OPENAI_TTS_VOICE="marin"
+```
+
+Do not commit a real key. `.env` files are ignored.
 
 ## Frontend quick start
 
@@ -68,12 +122,9 @@ Current UI features:
 3. Demo fallback buttons: Start Vision, Stop Vision, Simulate Close, Simulate Wave, Simulate Voice Hi, Reset Session.
 4. Text-based AI guide chat via `/api/chat`.
 5. Browser speech recognition for Chinese Mandarin and English.
-6. Browser SpeechSynthesis TTS for AI answers.
+6. TTS provider selector: `Local Kokoro → OpenAI → Browser`, `Local Kokoro only`, `OpenAI only`, or `Browser only`.
 7. Language-choice prompt after greeting: English by default; say `Chinese` or `中文` to use Chinese.
-8. Product cards from `/api/products`.
-9. Recommendation highlighting.
-10. Two-product comparison via `/api/products/compare`.
-11. Customer need profile from backend session data.
+8. Product cards, recommendation highlighting, comparison, and customer need profile.
 
 ## Voice interaction
 
@@ -81,23 +132,22 @@ Use Chrome or Edge for the most reliable Web Speech API support.
 
 Recommended flow:
 
-1. Start backend and frontend.
+1. Start local Kokoro TTS service, main backend, and frontend.
 2. Click `Start Vision`.
 3. Move close to the camera until the state becomes `顾客已靠近，等待问候`.
 4. Say `hello` or wave while close to the camera.
 5. The AI greeter asks: `Which language would you like to use, Chinese or English? English is the default.`
-6. Say `Chinese` or type/click `中文` to use Chinese. If the user says anything else, or chooses English, the conversation continues in English.
+6. Say `Chinese` or type/click `中文` to use Chinese. Otherwise, the conversation continues in English.
 7. After language selection, the AI plays the welcome message in the selected language.
 8. Click `Start Listening` again and ask product questions.
 
 Important behavior:
 
-- English is the default conversation language after greeting.
-- Saying `Chinese`, `Mandarin`, `中文`, or `普通话` switches the conversation to Chinese.
+- Auto TTS mode tries local Kokoro first, then OpenAI, then browser fallback.
 - Voice greeting requires the customer to be close to the camera, same as wave greeting.
 - TTS playback is stopped before listening starts to avoid the system hearing its own answer.
 - This is push-to-talk voice interaction, not real-time barge-in interruption.
-- If browser STT fails, use the text box, language-choice buttons, or demo fallback buttons.
+- If local Kokoro or OpenAI TTS fails, use browser fallback.
 
 English test questions:
 
@@ -115,156 +165,7 @@ Chinese test questions:
 潮湿环境或者回南天比较严重，哪种地板更合适？
 ```
 
-## Vision service
+## More docs
 
-The backend owns the camera. The frontend should display the MJPEG stream from `/api/vision/stream`; it should not open the camera directly.
-
-Endpoints:
-
-- `POST /api/vision/start`
-- `POST /api/vision/stop`
-- `GET /api/vision/status`
-- `GET /api/vision/stream`
-
-Vision smoke test:
-
-```powershell
-cd F:\emergency-wood-floor-greeter-demo\backend
-powershell -ExecutionPolicy Bypass -File .\scripts\smoke_test_vision.ps1
-```
-
-Expected flow:
-
-1. Start the vision service.
-2. Open http://127.0.0.1:8000/api/vision/stream in a browser.
-3. Move close to the camera; status should become `PERSON_CLOSE_WAITING_GREETING`.
-4. Wave left/right; status should become `GREETING_RECEIVED` and the frontend should ask for language selection.
-
-Manual vision commands:
-
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/vision/start" -Method Post
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/vision/status" -Method Get | ConvertTo-Json -Depth 10
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/vision/stop" -Method Post
-```
-
-## Windows PowerShell notes
-
-In Windows PowerShell, `curl` is often an alias for `Invoke-WebRequest`, not real curl. Therefore Linux-style flags such as `-H` and `-d` may fail. Use either `Invoke-RestMethod`, the provided smoke test script, or `curl.exe`.
-
-To reduce garbled Chinese output in the terminal, run this first:
-
-```powershell
-chcp 65001
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$OutputEncoding = [System.Text.Encoding]::UTF8
-```
-
-## Recommended backend smoke test
-
-Start the backend in one terminal, then run this in another terminal:
-
-```powershell
-cd F:\emergency-wood-floor-greeter-demo\backend
-powershell -ExecutionPolicy Bypass -File .\scripts\smoke_test_backend.ps1
-```
-
-This script uses raw UTF-8 decoding for the debug endpoints and avoids the Windows PowerShell `curl` alias problem.
-
-## Manual smoke tests with Invoke-RestMethod
-
-Health check:
-
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/health" -Method Get
-```
-
-Encoding debug:
-
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/debug/encoding" -Method Get | ConvertTo-Json -Depth 10
-```
-
-Product list:
-
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/products" -Method Get | ConvertTo-Json -Depth 10
-```
-
-If the terminal still shows mojibake, use explicit raw-byte UTF-8 decoding:
-
-```powershell
-$resp = Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/products" -UseBasicParsing
-$reader = New-Object System.IO.StreamReader($resp.RawContentStream, [System.Text.Encoding]::UTF8)
-$text = $reader.ReadToEnd()
-$text
-```
-
-Simulate customer close:
-
-```powershell
-$body = @{ event = "person_close" } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/demo/event" `
-  -Method Post `
-  -ContentType "application/json; charset=utf-8" `
-  -Body $body
-```
-
-Simulate voice greeting:
-
-```powershell
-$body = @{ text = "你好" } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/greeting/voice" `
-  -Method Post `
-  -ContentType "application/json; charset=utf-8" `
-  -Body $body
-```
-
-Ask a product question in selected language:
-
-```powershell
-$body = @{ text = "I have pets and want flooring for a modern living room. Which floor is easy to clean?"; response_language = "en" } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/chat" `
-  -Method Post `
-  -ContentType "application/json; charset=utf-8" `
-  -Body $body | ConvertTo-Json -Depth 10
-```
-
-Chinese selected-language chat:
-
-```powershell
-$body = @{ text = "家里有宠物，客厅用，现代简约，预算中等，哪种地板好打理？"; response_language = "zh" } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/chat" `
-  -Method Post `
-  -ContentType "application/json; charset=utf-8" `
-  -Body $body | ConvertTo-Json -Depth 10
-```
-
-Compare products:
-
-```powershell
-$body = @{ product_ids = @("WF-SPC-001", "WF-WOOD-002") } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/products/compare" `
-  -Method Post `
-  -ContentType "application/json; charset=utf-8" `
-  -Body $body | ConvertTo-Json -Depth 10
-```
-
-## Smoke tests with real curl.exe
-
-```powershell
-curl.exe http://127.0.0.1:8000/api/health
-curl.exe http://127.0.0.1:8000/api/products
-
-curl.exe -X POST "http://127.0.0.1:8000/api/demo/event" `
-  -H "Content-Type: application/json; charset=utf-8" `
-  --data-raw "{\"event\":\"person_close\"}"
-
-curl.exe -X POST "http://127.0.0.1:8000/api/greeting/voice" `
-  -H "Content-Type: application/json; charset=utf-8" `
-  --data-raw "{\"text\":\"你好\"}"
-```
-
-## Current implementation status
-
-The backend is runnable and includes a real OpenCV + MediaPipe vision service. The frontend retail UI includes camera stream, live status, language-choice prompt after greeting, browser STT/TTS, selected-language chat, product cards, comparison, customer profile and demo fallback controls.
+- Local Kokoro setup: `local_tts/README.md`
+- OpenAI TTS setup: `backend/OPENAI_TTS_SETUP.md`
