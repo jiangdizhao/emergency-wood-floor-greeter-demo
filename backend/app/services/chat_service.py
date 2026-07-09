@@ -15,6 +15,9 @@ class ChatService:
         cjk_chars = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
         return "en" if ascii_letters > cjk_chars else "zh"
 
+    def normalize_response_language(self, text: str, response_language: str | None = None) -> str:
+        return response_language if response_language in {"zh", "en"} else self.detect_language(text)
+
     def is_greeting(self, text: str) -> bool:
         normalized = text.lower().replace(" ", "")
         english = text.lower()
@@ -27,8 +30,8 @@ class ChatService:
         normalized = text.lower().replace(" ", "")
         return any(k in normalized for k in ["再见", "结束", "谢谢", "不用了", "bye", "goodbye", "thanks", "thankyou"])
 
-    def build_welcome_message(self, text: str = "") -> str:
-        if self.detect_language(text) == "en":
+    def build_welcome_message(self, text: str = "", response_language: str | None = None) -> str:
+        if self.normalize_response_language(text, response_language) == "en":
             return (
                 "Hello, welcome to the wood flooring experience area. I can help you compare materials, colors, "
                 "wear resistance, waterproof performance, floor-heating compatibility, and maintenance. You can ask me "
@@ -44,10 +47,11 @@ class ChatService:
         user_text: str,
         customer_profile: CustomerProfile,
         recommended_products: list[FlooringProduct],
+        response_language: str | None = None,
     ) -> str:
         text = user_text.lower().replace(" ", "")
         english = user_text.lower()
-        lang = self.detect_language(user_text)
+        lang = self.normalize_response_language(user_text, response_language)
 
         if any(k in text for k in ["对比", "区别", "哪个好"]) or any(
             k in english for k in ["compare", "difference", "which is better", "better"]
