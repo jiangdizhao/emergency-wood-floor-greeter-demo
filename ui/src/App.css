@@ -172,7 +172,7 @@
 
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   padding: 0 18px 18px;
 }
@@ -208,6 +208,7 @@
   color: #f8fafc;
   font-size: 15px;
   line-height: 1.25;
+  word-break: break-word;
 }
 
 .chat-panel {
@@ -221,8 +222,8 @@
   flex: 1;
   flex-direction: column;
   gap: 12px;
-  min-height: 390px;
-  max-height: 560px;
+  min-height: 350px;
+  max-height: 500px;
   padding: 18px;
   overflow-y: auto;
 }
@@ -267,6 +268,31 @@
   align-self: center;
   background: rgba(71, 85, 105, 0.45);
   border: 1px solid rgba(148, 163, 184, 0.26);
+}
+
+.quick-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 18px 14px;
+}
+
+.prompt-chip {
+  flex: 1 1 210px;
+  min-height: 42px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  color: #dbeafe;
+  background: rgba(30, 64, 175, 0.34);
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.prompt-chip.active {
+  color: #082f49;
+  background: linear-gradient(135deg, #bae6fd, #86efac);
+  border-color: rgba(186, 230, 253, 0.8);
 }
 
 .chat-input-row {
@@ -465,6 +491,10 @@ th {
   .dashboard-grid,
   .lower-grid {
     grid-template-columns: 1fr;
+  }
+
+  .status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .button-grid {
