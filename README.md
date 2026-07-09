@@ -22,10 +22,12 @@ Open:
 - API root: http://127.0.0.1:8000/
 - Health: http://127.0.0.1:8000/api/health
 - Docs: http://127.0.0.1:8000/docs
+- UTF-8 JSON debug: http://127.0.0.1:8000/api/debug/encoding
+- UTF-8 plain-text debug: http://127.0.0.1:8000/api/debug/plain-utf8
 
 ## Windows PowerShell notes
 
-In Windows PowerShell, `curl` is often an alias for `Invoke-WebRequest`, not real curl. Therefore Linux-style flags such as `-H` and `-d` may fail. Use either `Invoke-RestMethod` or `curl.exe`.
+In Windows PowerShell, `curl` is often an alias for `Invoke-WebRequest`, not real curl. Therefore Linux-style flags such as `-H` and `-d` may fail. Use either `Invoke-RestMethod`, the provided smoke test script, or `curl.exe`.
 
 To reduce garbled Chinese output in the terminal, run this first:
 
@@ -35,7 +37,18 @@ chcp 65001
 $OutputEncoding = [System.Text.Encoding]::UTF8
 ```
 
-## Smoke tests with Invoke-RestMethod
+## Recommended backend smoke test
+
+Start the backend in one terminal, then run this in another terminal:
+
+```powershell
+cd F:\emergency-wood-floor-greeter-demo\backend
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke_test_backend.ps1
+```
+
+This script uses raw UTF-8 decoding for the debug endpoints and avoids the Windows PowerShell `curl` alias problem.
+
+## Manual smoke tests with Invoke-RestMethod
 
 Health check:
 
@@ -43,10 +56,25 @@ Health check:
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/health" -Method Get
 ```
 
+Encoding debug:
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/debug/encoding" -Method Get | ConvertTo-Json -Depth 10
+```
+
 Product list:
 
 ```powershell
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/products" -Method Get | ConvertTo-Json -Depth 10
+```
+
+If the terminal still shows mojibake, use explicit raw-byte UTF-8 decoding:
+
+```powershell
+$resp = Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/products" -UseBasicParsing
+$reader = New-Object System.IO.StreamReader($resp.RawContentStream, [System.Text.Encoding]::UTF8)
+$text = $reader.ReadToEnd()
+$text
 ```
 
 Simulate customer close:
@@ -106,4 +134,4 @@ curl.exe -X POST "http://127.0.0.1:8000/api/greeting/voice" `
 
 ## Current implementation status
 
-This commit makes the backend runnable. `/api/vision/status` is currently simulated so the backend does not depend on camera drivers during startup. The next step is to attach the real OpenCV + MediaPipe vision service.
+The backend is runnable. `/api/vision/status` is currently simulated so the backend does not depend on camera drivers during startup. The next step is to attach the real OpenCV + MediaPipe vision service.
