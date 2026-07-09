@@ -238,10 +238,11 @@ def voice_greeting(request: GreetingRequest) -> dict:
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
+    lang = chat_service.normalize_response_language(request.text, request.response_language)
+
     if chat_service.is_session_end(request.text):
         state_machine.handle_event("end")
         profile = lead_service.load_profile(session_id=request.session_id)
-        lang = chat_service.detect_language(request.text)
         answer = (
             "Thanks for visiting. The sales team can continue follow-up based on this requirement record."
             if lang == "en"
@@ -271,6 +272,7 @@ def chat(request: ChatRequest) -> ChatResponse:
         user_text=request.text,
         customer_profile=updated_profile,
         recommended_products=recommended,
+        response_language=lang,
     )
     updated_profile.recommended_product_ids = [p.id for p in recommended]
     updated_profile.conversation_summary = chat_service.build_conversation_summary(updated_profile)
