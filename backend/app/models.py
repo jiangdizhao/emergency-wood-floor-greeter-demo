@@ -79,6 +79,13 @@ class ChatResponse(BaseModel):
     state: SessionState
 
 
+class TTSRequest(BaseModel):
+    text: str
+    language: Literal["zh", "en"] = "en"
+    provider: Literal["openai", "browser", "auto"] = "auto"
+    voice: str | None = None
+
+
 class GreetingRequest(BaseModel):
     text: str
     session_id: str = "demo-session-001"
