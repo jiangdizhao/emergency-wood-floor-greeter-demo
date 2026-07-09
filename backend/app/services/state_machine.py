@@ -26,11 +26,31 @@ class StoreSessionStateMachine:
             self.reset()
             return {"message": "session reset"}
 
-        if event == "person_far":
+        if event == "person_lost":
+            self.person_detected = False
+            self.distance = "NONE"
+            self.wave_detected = False
+            self.greeting_source = None
+            if self.state in {
+                SessionState.IDLE,
+                SessionState.PERSON_DETECTED_FAR,
+                SessionState.PERSON_CLOSE_WAITING_GREETING,
+                SessionState.SESSION_END,
+            }:
+                self.state = SessionState.IDLE
+            message = "未检测到顾客。"
+
+        elif event == "person_far":
             self.person_detected = True
             self.distance = "FAR"
             self.wave_detected = False
-            if self.state in {SessionState.IDLE, SessionState.SESSION_END}:
+            self.greeting_source = None
+            if self.state in {
+                SessionState.IDLE,
+                SessionState.PERSON_DETECTED_FAR,
+                SessionState.PERSON_CLOSE_WAITING_GREETING,
+                SessionState.SESSION_END,
+            }:
                 self.state = SessionState.PERSON_DETECTED_FAR
             message = "检测到顾客，但距离还不够近。"
 
@@ -44,12 +64,13 @@ class StoreSessionStateMachine:
 
         elif event == "wave":
             self.wave_detected = True
-            if self.state == SessionState.PERSON_CLOSE_WAITING_GREETING:
+            if self.state == SessionState.PERSON_CLOSE_WAITING_GREETING and self.distance == "CLOSE":
                 self.state = SessionState.GREETING_RECEIVED
                 self.greeting_source = "wave"
-                message = "检测到挥手问候。"
+                message = "检测到近距离挥手问候。"
             else:
-                message = "检测到挥手，但当前状态未等待问候。"
+                self.wave_detected = False
+                message = "检测到挥手，但顾客未处于近距离等待问候状态。"
 
         elif event == "greeting":
             if self.state == SessionState.IDLE:
@@ -64,7 +85,7 @@ class StoreSessionStateMachine:
             # Used by the vision-only smoke test. Once a wave greeting has been
             # visible for a few seconds, return to the waiting state so a tester
             # can try another wave without manually resetting the backend.
-            if self.state == SessionState.GREETING_RECEIVED and self.person_detected:
+            if self.state == SessionState.GREETING_RECEIVED and self.person_detected and self.distance == "CLOSE":
                 self.state = SessionState.PERSON_CLOSE_WAITING_GREETING
                 self.wave_detected = False
                 self.greeting_source = None
