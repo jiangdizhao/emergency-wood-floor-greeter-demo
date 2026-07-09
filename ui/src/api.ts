@@ -11,6 +11,7 @@ export type SessionState =
   | 'SESSION_END'
 
 export type ResponseLanguage = 'zh' | 'en'
+export type TTSProvider = 'auto' | 'openai' | 'browser'
 
 export type FlooringProduct = {
   id: string
@@ -86,6 +87,14 @@ export type CompareRow = {
   values: Record<string, unknown>
 }
 
+export type TTSStatus = {
+  ok: boolean
+  openai_tts_configured: boolean
+  model: string
+  voice: string
+  fallback: string
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   if (!headers.has('Content-Type')) {
@@ -157,6 +166,31 @@ export function sendChat(text: string, responseLanguage?: ResponseLanguage): Pro
     method: 'POST',
     body: JSON.stringify({ text, response_language: responseLanguage }),
   })
+}
+
+export function getTTSStatus(): Promise<TTSStatus> {
+  return requestJson<TTSStatus>('/api/tts/status')
+}
+
+export async function synthesizeSpeech(
+  text: string,
+  language: ResponseLanguage,
+  provider: TTSProvider = 'auto',
+): Promise<Blob> {
+  const response = await fetch(`${API_BASE_URL}/api/tts`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+    body: JSON.stringify({ text, language, provider }),
+  })
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '')
+    throw new Error(`${response.status} ${response.statusText}${detail ? `: ${detail}` : ''}`)
+  }
+
+  return await response.blob()
 }
 
 export function compareProducts(productIds: string[]): Promise<{ comparison: CompareRow[] }> {
