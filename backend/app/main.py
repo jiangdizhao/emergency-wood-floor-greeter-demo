@@ -219,13 +219,19 @@ def voice_greeting(request: GreetingRequest) -> dict:
         return {
             "accepted": True,
             "state": state_machine.state.value,
-            "message": chat_service.build_welcome_message(),
+            "message": chat_service.build_welcome_message(request.text),
             "status": {**state_machine.to_status_dict(), **result},
         }
+    lang = chat_service.detect_language(request.text)
+    message = (
+        "Greeting not recognized. Please say: hello, hi, or wave to the screen."
+        if lang == "en"
+        else "未识别到明确问候。请说：你好、hi、hello，或向屏幕挥手。"
+    )
     return {
         "accepted": False,
         "state": state_machine.state.value,
-        "message": "未识别到明确问候。请说：你好、hi、hello，或向屏幕挥手。",
+        "message": message,
         "status": state_machine.to_status_dict(),
     }
 
@@ -235,11 +241,22 @@ def chat(request: ChatRequest) -> ChatResponse:
     if chat_service.is_session_end(request.text):
         state_machine.handle_event("end")
         profile = lead_service.load_profile(session_id=request.session_id)
+        lang = chat_service.detect_language(request.text)
+        answer = (
+            "Thanks for visiting. The sales team can continue follow-up based on this requirement record."
+            if lang == "en"
+            else "好的，感谢您的咨询。稍后销售可以根据本次需求记录继续跟进。"
+        )
+        follow_up = (
+            "Sales should follow up within 24 hours to confirm area, budget, and installation schedule."
+            if lang == "en"
+            else "建议销售在 24 小时内回访，确认房间面积、预算和安装时间。"
+        )
         return ChatResponse(
-            answer="好的，感谢您的咨询。稍后销售可以根据本次需求记录继续跟进。",
+            answer=answer,
             recommended_products=[],
             customer_profile=profile,
-            follow_up_suggestion="建议销售在 24 小时内回访，确认房间面积、预算和安装时间。",
+            follow_up_suggestion=follow_up,
             state=state_machine.state,
         )
 
