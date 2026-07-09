@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.responses import JSONResponse
+from starlette.requests import Request
+from starlette.responses import JSONResponse, PlainTextResponse
 
 from .models import (
     ChatRequest,
@@ -64,6 +65,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def force_utf8_json_content_type(request: Request, call_next):  # type: ignore[no-untyped-def]
+    """Add charset=utf-8 to JSON responses for Windows PowerShell clients.
+
+    Some PowerShell versions decode `application/json` incorrectly when the
+    charset is not explicit. This middleware is a defensive backstop in addition
+    to `UTF8JSONResponse`.
+    """
+    response = await call_next(request)
+    content_type = response.headers.get("content-type", "")
+    if content_type.startswith("application/json") and "charset=" not in content_type.lower():
+        response.headers["content-type"] = "application/json; charset=utf-8"
+    return response
+
+
 product_service = ProductService()
 lead_service = LeadService()
 recommendation_service = RecommendationService(product_service=product_service)
@@ -85,6 +102,8 @@ def root() -> dict:
             "POST /api/demo/event",
             "GET /api/session/status",
             "POST /api/session/reset",
+            "GET /api/debug/encoding",
+            "GET /api/debug/plain-utf8",
         ],
     }
 
@@ -95,6 +114,33 @@ def health() -> dict:
         "ok": True,
         "state": state_machine.state.value,
         "product_count": len(product_service.list_products()),
+    }
+
+
+@app.get("/api/debug/encoding")
+def debug_encoding() -> dict:
+    """Small UTF-8 JSON endpoint for diagnosing terminal/client encoding."""
+    return {
+        "ok": True,
+        "encoding_expected": "utf-8",
+        "chinese_sample": "你好，木地板，云杉浅灰 SPC 锁扣地板，客厅，现代简约。",
+        "product_name_sample": product_service.list_products()[0].name if product_service.list_products() else None,
+        "powershell_tip": "Use backend/scripts/smoke_test_backend.ps1 or decode RawContentStream as UTF-8.",
+    }
+
+
+@app.get("/api/debug/plain-utf8")
+def debug_plain_utf8() -> PlainTextResponse:
+    """Plain-text UTF-8 endpoint to separate backend encoding from JSON decoding."""
+    text = "你好，木地板，云杉浅灰 SPC 锁扣地板，客厅，现代简约。\n"
+    return PlainTextResponse(text, media_type="text/plain; charset=utf-8")
+
+
+@app.get("/api/debug/product-names")
+def debug_product_names() -> dict:
+    return {
+        "names": [product.name for product in product_service.list_products()],
+        "types": [product.type for product in product_service.list_products()],
     }
 
 
