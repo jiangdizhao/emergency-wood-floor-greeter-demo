@@ -207,6 +207,7 @@ function App() {
   const [ttsEnabled, setTtsEnabled] = useState(true)
   const [ttsProvider, setTtsProvider] = useState<TTSProvider>('auto')
   const [openaiTTSConfigured, setOpenaiTTSConfigured] = useState<boolean | null>(null)
+  const [localTTSAvailable, setLocalTTSAvailable] = useState<boolean | null>(null)
   const handledGreetingRef = useRef<number | null>(null)
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -255,8 +256,10 @@ function App() {
     try {
       const status = await getTTSStatus()
       setOpenaiTTSConfigured(status.openai_tts_configured)
+      setLocalTTSAvailable(Boolean(status.local_tts_available))
     } catch {
       setOpenaiTTSConfigured(false)
+      setLocalTTSAvailable(false)
     }
   }
 
@@ -339,7 +342,7 @@ function App() {
     })
   }
 
-  async function speakWithOpenAI(text: string, language: VoiceLanguage): Promise<void> {
+  async function speakWithBackendTTS(text: string, language: VoiceLanguage): Promise<void> {
     const responseLanguage = responseLanguageFromVoiceLanguage(language)
     setVoiceStatus('speaking')
     setVoiceError(null)
@@ -350,7 +353,7 @@ function App() {
     audioRef.current = audio
     await new Promise<void>((resolve, reject) => {
       audio.onended = () => resolve()
-      audio.onerror = () => reject(new Error('OpenAI TTS audio playback failed.'))
+      audio.onerror = () => reject(new Error('Backend TTS audio playback failed.'))
       audio.play().catch(reject)
     })
     URL.revokeObjectURL(url)
@@ -366,12 +369,13 @@ function App() {
 
     if (ttsProvider !== 'browser') {
       try {
-        await speakWithOpenAI(text, language)
+        await speakWithBackendTTS(text, language)
+        void refreshTTSStatus()
         return
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        setVoiceError(`OpenAI TTS unavailable; using browser fallback. ${message}`)
-        if (ttsProvider === 'openai') {
+        setVoiceError(`Backend TTS unavailable; using browser fallback. ${message}`)
+        if (ttsProvider === 'openai' || ttsProvider === 'local') {
           setVoiceStatus('error')
           return
         }
@@ -551,6 +555,7 @@ function App() {
         },
       ])
       setStreamSrc(streamUrl())
+      void refreshTTSStatus()
     })
   }
 
@@ -682,7 +687,8 @@ function App() {
               <label>
                 TTS Provider
                 <select value={ttsProvider} onChange={(event) => setTtsProvider(event.target.value as TTSProvider)}>
-                  <option value="auto">OpenAI with browser fallback</option>
+                  <option value="auto">Local Kokoro → OpenAI → Browser</option>
+                  <option value="local">Local Kokoro only</option>
                   <option value="openai">OpenAI only</option>
                   <option value="browser">Browser only</option>
                 </select>
@@ -713,6 +719,7 @@ function App() {
             <div className="voice-status-line">
               <span>STT: {speechRecognitionSupported ? 'supported' : 'not supported'}</span>
               <span>Browser TTS: {speechSynthesisSupported ? 'supported' : 'not supported'}</span>
+              <span>Local Kokoro: {localTTSAvailable === null ? 'checking' : localTTSAvailable ? 'available' : 'not running'}</span>
               <span>OpenAI TTS: {openaiTTSConfigured === null ? 'checking' : openaiTTSConfigured ? 'configured' : 'not configured'}</span>
               <span>Conversation: {voiceLanguage === 'zh-CN' ? 'Chinese' : 'English default'}</span>
               <span>Heard: {lastTranscript || 'None'}</span>
