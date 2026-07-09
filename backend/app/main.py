@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from .models import (
     ChatRequest,
@@ -24,6 +24,7 @@ from .services.lead_service import LeadService
 from .services.product_service import ProductService
 from .services.recommendation_service import RecommendationService
 from .services.state_machine import StoreSessionStateMachine
+from .vision.vision_service import VisionConfig, VisionService
 
 
 class UTF8JSONResponse(JSONResponse):
@@ -86,6 +87,12 @@ lead_service = LeadService()
 recommendation_service = RecommendationService(product_service=product_service)
 chat_service = ChatService(product_service=product_service, recommendation_service=recommendation_service)
 state_machine = StoreSessionStateMachine()
+vision_service = VisionService(state_machine=state_machine, config=VisionConfig())
+
+
+@app.on_event("shutdown")
+def shutdown_event() -> None:
+    vision_service.stop()
 
 
 @app.get("/")
@@ -102,6 +109,10 @@ def root() -> dict:
             "POST /api/demo/event",
             "GET /api/session/status",
             "POST /api/session/reset",
+            "POST /api/vision/start",
+            "POST /api/vision/stop",
+            "GET /api/vision/status",
+            "GET /api/vision/stream",
             "GET /api/debug/encoding",
             "GET /api/debug/plain-utf8",
         ],
@@ -114,6 +125,7 @@ def health() -> dict:
         "ok": True,
         "state": state_machine.state.value,
         "product_count": len(product_service.list_products()),
+        "vision_running": vision_service.get_status().get("running", False),
     }
 
 
@@ -271,19 +283,26 @@ def save_customer(request: CustomerSaveRequest) -> dict:
     }
 
 
+@app.post("/api/vision/start")
+def vision_start() -> dict:
+    return vision_service.start()
+
+
+@app.post("/api/vision/stop")
+def vision_stop() -> dict:
+    return vision_service.stop()
+
+
 @app.get("/api/vision/status")
 def vision_status() -> dict:
-    """Placeholder status for Day-1 backend startup.
+    return vision_service.get_status()
 
-    Real camera processing will be attached next. For now this endpoint lets the UI
-    and the demo controls run without blocking backend startup on camera drivers.
-    """
-    status = state_machine.to_status_dict()
-    return {
-        "ok": True,
-        "mode": "simulated_until_vision_service_is_enabled",
-        "person_detected": status.get("person_detected", False),
-        "distance": status.get("distance", "UNKNOWN"),
-        "wave_detected": status.get("wave_detected", False),
-        "state": state_machine.state.value,
-    }
+
+@app.get("/api/vision/stream")
+def vision_stream() -> StreamingResponse:
+    if not vision_service.get_status().get("running"):
+        vision_service.start()
+    return StreamingResponse(
+        vision_service.mjpeg_generator(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
