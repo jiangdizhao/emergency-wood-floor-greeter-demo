@@ -5,6 +5,7 @@ import {
   compareProducts,
   getProducts,
   getSessionStatus,
+  getTTSStatus,
   getVisionStatus,
   resetSession,
   sendChat,
@@ -13,11 +14,13 @@ import {
   startVision,
   stopVision,
   streamUrl,
+  synthesizeSpeech,
   type CompareRow,
   type CustomerProfile,
   type FlooringProduct,
   type ResponseLanguage,
   type SessionState,
+  type TTSProvider,
   type VisionStatus,
 } from './api'
 
@@ -30,29 +33,10 @@ type ChatMessage = {
 type VoiceLanguage = 'zh-CN' | 'en-US'
 type VoiceStatus = 'idle' | 'listening' | 'processing' | 'speaking' | 'error'
 
-type BrowserSpeechRecognitionAlternative = {
-  transcript: string
-  confidence?: number
-}
-
-type BrowserSpeechRecognitionResult = {
-  isFinal?: boolean
-  length: number
-  [index: number]: BrowserSpeechRecognitionAlternative
-}
-
-type BrowserSpeechRecognitionEvent = {
-  results: {
-    length: number
-    [index: number]: BrowserSpeechRecognitionResult
-  }
-}
-
-type BrowserSpeechRecognitionErrorEvent = {
-  error: string
-  message?: string
-}
-
+type BrowserSpeechRecognitionAlternative = { transcript: string; confidence?: number }
+type BrowserSpeechRecognitionResult = { isFinal?: boolean; length: number; [index: number]: BrowserSpeechRecognitionAlternative }
+type BrowserSpeechRecognitionEvent = { results: { length: number; [index: number]: BrowserSpeechRecognitionResult } }
+type BrowserSpeechRecognitionErrorEvent = { error: string; message?: string }
 type BrowserSpeechRecognition = {
   lang: string
   continuous: boolean
@@ -66,15 +50,12 @@ type BrowserSpeechRecognition = {
   onerror: ((event: BrowserSpeechRecognitionErrorEvent) => void) | null
   onresult: ((event: BrowserSpeechRecognitionEvent) => void) | null
 }
-
 type BrowserSpeechRecognitionConstructor = new () => BrowserSpeechRecognition
 
 const LANGUAGE_PROMPT_EN =
-  'Which language would you like to use, Chinese or English? English is the default. Say Chinese or 中文 to use Chinese. Otherwise, I will continue in English.'
-
+  'Which language would you like to use, Chinese or English? English is the default. Say Chinese or Mandarin to use Chinese. Otherwise, I will continue in English.'
 const WELCOME_ZH =
   '好的，后续我会用中文为您服务。欢迎来到木地板体验区。我可以帮您比较材质、颜色、耐磨、防水、地暖适配和日常维护。您可以直接问我家里有宠物怎么选，或者哪种适合地暖。'
-
 const WELCOME_EN =
   'Great, I will continue in English. Welcome to the wood flooring experience area. I can help you compare materials, colors, wear resistance, waterproof performance, floor heating compatibility, and maintenance.'
 
@@ -139,9 +120,7 @@ function extractTranscript(event: BrowserSpeechRecognitionEvent): string {
   let transcript = ''
   for (let i = 0; i < event.results.length; i += 1) {
     const result = event.results[i]
-    if (result.length > 0) {
-      transcript += result[0].transcript
-    }
+    if (result.length > 0) transcript += result[0].transcript
   }
   return transcript.trim()
 }
@@ -167,17 +146,9 @@ function wantsChinese(text: string): boolean {
 
 function isGreetingText(text: string): boolean {
   const normalized = text.toLowerCase().replace(/\s+/g, '')
-  return [
-    '你好',
-    '您好',
-    '嗨',
-    'hi',
-    'hello',
-    'hey',
-    'goodmorning',
-    'goodafternoon',
-    'goodevening',
-  ].some((keyword) => normalized.includes(keyword))
+  return ['你好', '您好', '嗨', 'hi', 'hello', 'hey', 'goodmorning', 'goodafternoon', 'goodevening'].some(
+    (keyword) => normalized.includes(keyword),
+  )
 }
 
 function formatPercent(value: number): string {
@@ -234,19 +205,20 @@ function App() {
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const [lastTranscript, setLastTranscript] = useState('')
   const [ttsEnabled, setTtsEnabled] = useState(true)
+  const [ttsProvider, setTtsProvider] = useState<TTSProvider>('auto')
+  const [openaiTTSConfigured, setOpenaiTTSConfigured] = useState<boolean | null>(null)
   const handledGreetingRef = useRef<number | null>(null)
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const audioUrlRef = useRef<string | null>(null)
 
   const speechRecognitionSupported = useMemo(() => getRecognitionConstructor() !== null, [])
   const speechSynthesisSupported = useMemo(() => 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window, [])
-
-  const recommendedIds = useMemo(
-    () => new Set(recommendedProducts.map((product) => product.id)),
-    [recommendedProducts],
-  )
+  const recommendedIds = useMemo(() => new Set(recommendedProducts.map((product) => product.id)), [recommendedProducts])
 
   useEffect(() => {
     void refreshCatalogAndSession()
+    void refreshTTSStatus()
   }, [])
 
   useEffect(() => {
@@ -259,12 +231,9 @@ function App() {
           setError(null)
         }
       } catch (err) {
-        if (alive) {
-          setError(err instanceof Error ? err.message : String(err))
-        }
+        if (alive) setError(err instanceof Error ? err.message : String(err))
       }
     }
-
     void poll()
     const timer = window.setInterval(poll, 700)
     return () => {
@@ -275,19 +244,21 @@ function App() {
 
   useEffect(() => {
     const lastWaveAt = visionStatus.last_wave_at
-    if (visionStatus.state !== 'GREETING_RECEIVED' || lastWaveAt === null) {
-      return
-    }
-    if (!visionStatus.stable_close || visionStatus.distance !== 'CLOSE') {
-      return
-    }
-    if (handledGreetingRef.current === lastWaveAt) {
-      return
-    }
-
+    if (visionStatus.state !== 'GREETING_RECEIVED' || lastWaveAt === null) return
+    if (!visionStatus.stable_close || visionStatus.distance !== 'CLOSE') return
+    if (handledGreetingRef.current === lastWaveAt) return
     handledGreetingRef.current = lastWaveAt
     void beginLanguageSelection(`视觉检测到近距离挥手问候：${visionStatus.last_wave_event ?? 'WAVE'}`)
   }, [visionStatus.distance, visionStatus.last_wave_at, visionStatus.last_wave_event, visionStatus.stable_close, visionStatus.state])
+
+  async function refreshTTSStatus() {
+    try {
+      const status = await getTTSStatus()
+      setOpenaiTTSConfigured(status.openai_tts_configured)
+    } catch {
+      setOpenaiTTSConfigured(false)
+    }
+  }
 
   async function refreshCatalogAndSession() {
     await runAction('refresh', async () => {
@@ -300,14 +271,7 @@ function App() {
   }
 
   function appendMessage(role: ChatMessage['role'], text: string) {
-    setMessages((current) => [
-      ...current,
-      {
-        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        role,
-        text,
-      },
-    ])
+    setMessages((current) => [...current, { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, role, text }])
   }
 
   function advanceSuggestedPrompt() {
@@ -335,23 +299,28 @@ function App() {
     }
   }
 
-  async function speakText(text: string, languageOverride?: VoiceLanguage): Promise<void> {
-    if (!ttsEnabled || !text.trim()) {
-      return
+  function stopSpeaking() {
+    audioRef.current?.pause()
+    audioRef.current = null
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current)
+      audioUrlRef.current = null
     }
+    if (speechSynthesisSupported) window.speechSynthesis.cancel()
+    setVoiceStatus('idle')
+  }
+
+  async function speakWithBrowser(text: string, language: VoiceLanguage): Promise<void> {
     if (!speechSynthesisSupported) {
       setVoiceError('This browser does not support SpeechSynthesis TTS.')
       setVoiceStatus('error')
       return
     }
-
     window.speechSynthesis.cancel()
     const utterance = new SpeechSynthesisUtterance(text)
-    const lang = languageOverride ?? languageFromText(text, voiceLanguage)
-    utterance.lang = lang
-    utterance.rate = lang === 'en-US' ? 0.95 : 1.0
+    utterance.lang = language
+    utterance.rate = language === 'en-US' ? 0.95 : 1.0
     utterance.pitch = 1.0
-
     await new Promise<void>((resolve) => {
       utterance.onstart = () => {
         setVoiceStatus('speaking')
@@ -362,7 +331,7 @@ function App() {
         resolve()
       }
       utterance.onerror = (event) => {
-        setVoiceError(`TTS error: ${event.error}`)
+        setVoiceError(`Browser TTS error: ${event.error}`)
         setVoiceStatus('error')
         resolve()
       }
@@ -370,11 +339,45 @@ function App() {
     })
   }
 
-  function stopSpeaking() {
-    if (speechSynthesisSupported) {
-      window.speechSynthesis.cancel()
-    }
+  async function speakWithOpenAI(text: string, language: VoiceLanguage): Promise<void> {
+    const responseLanguage = responseLanguageFromVoiceLanguage(language)
+    setVoiceStatus('speaking')
+    setVoiceError(null)
+    const audioBlob = await synthesizeSpeech(text, responseLanguage, ttsProvider)
+    const url = URL.createObjectURL(audioBlob)
+    audioUrlRef.current = url
+    const audio = new Audio(url)
+    audioRef.current = audio
+    await new Promise<void>((resolve, reject) => {
+      audio.onended = () => resolve()
+      audio.onerror = () => reject(new Error('OpenAI TTS audio playback failed.'))
+      audio.play().catch(reject)
+    })
+    URL.revokeObjectURL(url)
+    audioUrlRef.current = null
+    audioRef.current = null
     setVoiceStatus('idle')
+  }
+
+  async function speakText(text: string, languageOverride?: VoiceLanguage): Promise<void> {
+    if (!ttsEnabled || !text.trim()) return
+    const language = languageOverride ?? languageFromText(text, voiceLanguage)
+    stopSpeaking()
+
+    if (ttsProvider !== 'browser') {
+      try {
+        await speakWithOpenAI(text, language)
+        return
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        setVoiceError(`OpenAI TTS unavailable; using browser fallback. ${message}`)
+        if (ttsProvider === 'openai') {
+          setVoiceStatus('error')
+          return
+        }
+      }
+    }
+    await speakWithBrowser(text, language)
   }
 
   function stopListening() {
@@ -399,13 +402,11 @@ function App() {
         ? 'Language selected: Chinese. 后续将使用中文对话。'
         : 'Language selected: English. I will continue in English.'
     const welcomeText = welcomeForLanguage(selectedLanguage)
-
     setVoiceLanguage(selectedLanguage)
     setLanguageSelectionPending(false)
     appendMessage('customer', rawText || '(default English)')
     appendMessage('system', selectedMessage)
     appendMessage('agent', welcomeText)
-
     await sendDemoEvent('intro_finished')
     const session = await getSessionStatus()
     const status = await getVisionStatus()
@@ -421,17 +422,14 @@ function App() {
       setVoiceStatus('error')
       return
     }
-
     stopSpeaking()
     recognitionRef.current?.abort()
-
     const recognition = new Recognition()
     recognitionRef.current = recognition
     recognition.lang = languageSelectionPending ? 'en-US' : voiceLanguage
     recognition.continuous = false
     recognition.interimResults = false
     recognition.maxAlternatives = 1
-
     recognition.onstart = () => {
       setVoiceStatus('listening')
       setVoiceError(null)
@@ -458,7 +456,6 @@ function App() {
         setVoiceStatus('error')
       })
     }
-
     try {
       recognition.start()
     } catch (err) {
@@ -469,10 +466,7 @@ function App() {
 
   async function handleRecognizedSpeech(transcript: string) {
     const trimmed = transcript.trim()
-    if (!trimmed) {
-      return
-    }
-
+    if (!trimmed) return
     if (languageSelectionPending) {
       await completeLanguageSelection(trimmed)
       return
@@ -493,11 +487,9 @@ function App() {
         await speakText(message, voiceLanguage)
         return
       }
-
       const result = await sendVoiceGreeting(trimmed)
-      if (result.accepted) {
-        await beginLanguageSelection('Voice greeting detected. Please choose the conversation language.')
-      } else {
+      if (result.accepted) await beginLanguageSelection('Voice greeting detected. Please choose the conversation language.')
+      else {
         appendMessage('agent', result.message)
         await speakText(result.message, languageFromText(result.message, voiceLanguage))
       }
@@ -568,11 +560,8 @@ function App() {
       setProfile(response.customer_profile)
       const status = await getVisionStatus()
       setVisionStatus(status)
-      if (event === 'wave' || event === 'greeting') {
-        await beginLanguageSelection(label)
-      } else {
-        appendMessage('system', label)
-      }
+      if (event === 'wave' || event === 'greeting') await beginLanguageSelection(label)
+      else appendMessage('system', label)
     })
   }
 
@@ -580,11 +569,8 @@ function App() {
     await runAction('voiceHi', async () => {
       const result = await sendVoiceGreeting('hello')
       appendMessage('customer', 'hello')
-      if (result.accepted) {
-        await beginLanguageSelection('Simulated voice greeting detected.')
-      } else {
-        appendMessage('agent', result.message)
-      }
+      if (result.accepted) await beginLanguageSelection('Simulated voice greeting detected.')
+      else appendMessage('agent', result.message)
       const session = await getSessionStatus()
       const status = await getVisionStatus()
       setProfile(session.customer_profile)
@@ -594,17 +580,13 @@ function App() {
 
   async function handleChatSubmit() {
     const text = inputText.trim()
-    if (!text) {
-      return
-    }
-
+    if (!text) return
     await runAction('chat', async () => {
       if (languageSelectionPending) {
         await completeLanguageSelection(text)
         advanceSuggestedPrompt()
         return
       }
-
       appendMessage('customer', text)
       const response = await sendChat(text, responseLanguageFromVoiceLanguage(voiceLanguage))
       appendMessage('agent', response.answer)
@@ -616,10 +598,7 @@ function App() {
   }
 
   async function handleCompareToggle(productId: string) {
-    const nextIds = compareIds.includes(productId)
-      ? compareIds.filter((id) => id !== productId)
-      : [...compareIds, productId].slice(-2)
-
+    const nextIds = compareIds.includes(productId) ? compareIds.filter((id) => id !== productId) : [...compareIds, productId].slice(-2)
     setCompareIds(nextIds)
     if (nextIds.length === 2) {
       await runAction('compare', async () => {
@@ -655,9 +634,7 @@ function App() {
               <h2>摄像头与视觉检测</h2>
               <p>Backend OpenCV + MediaPipe 独占摄像头；只有 CLOSE + stable=True 的挥手会触发问候。</p>
             </div>
-            <span className={`status-dot ${visionStatus.running ? 'on' : 'off'}`}>
-              {visionStatus.running ? 'RUNNING' : 'STOPPED'}
-            </span>
+            <span className={`status-dot ${visionStatus.running ? 'on' : 'off'}`}>{visionStatus.running ? 'RUNNING' : 'STOPPED'}</span>
           </div>
           <div className="camera-frame">
             <img src={streamSrc} alt="Vision stream" />
@@ -682,9 +659,7 @@ function App() {
               <h2>AI 导购对话</h2>
               <p>打招呼后先选择语言。说 Chinese / 中文 使用中文，否则默认 English。</p>
             </div>
-            <span className="status-dot neutral">
-              {languageSelectionPending ? 'WAITING LANGUAGE' : `VOICE: ${voiceStatus.toUpperCase()}`}
-            </span>
+            <span className="status-dot neutral">{languageSelectionPending ? 'WAITING LANGUAGE' : `VOICE: ${voiceStatus.toUpperCase()}`}</span>
           </div>
           <div className="chat-log">
             {messages.map((message) => (
@@ -704,23 +679,23 @@ function App() {
                   <option value="zh-CN">中文普通话 zh-CN</option>
                 </select>
               </label>
+              <label>
+                TTS Provider
+                <select value={ttsProvider} onChange={(event) => setTtsProvider(event.target.value as TTSProvider)}>
+                  <option value="auto">OpenAI with browser fallback</option>
+                  <option value="openai">OpenAI only</option>
+                  <option value="browser">Browser only</option>
+                </select>
+              </label>
               <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={ttsEnabled}
-                  onChange={(event) => setTtsEnabled(event.target.checked)}
-                />
+                <input type="checkbox" checked={ttsEnabled} onChange={(event) => setTtsEnabled(event.target.checked)} />
                 TTS 播报
               </label>
             </div>
             {languageSelectionPending && (
               <div className="language-choice-row">
-                <button type="button" onClick={() => void completeLanguageSelection('English')}>
-                  Use English / 默认英文
-                </button>
-                <button type="button" onClick={() => void completeLanguageSelection('中文')}>
-                  使用中文 / Chinese
-                </button>
+                <button type="button" onClick={() => void completeLanguageSelection('English')}>Use English / 默认英文</button>
+                <button type="button" onClick={() => void completeLanguageSelection('中文')}>使用中文 / Chinese</button>
               </div>
             )}
             <div className="voice-button-row">
@@ -730,21 +705,15 @@ function App() {
               <button type="button" className="secondary-button compact" onClick={stopListening} disabled={voiceStatus !== 'listening'}>
                 Stop Listening
               </button>
-              <button
-                type="button"
-                className="secondary-button compact"
-                onClick={() => void speakText(languageSelectionPending ? LANGUAGE_PROMPT_EN : 'Voice is ready.', 'en-US')}
-                disabled={!speechSynthesisSupported}
-              >
+              <button type="button" className="secondary-button compact" onClick={() => void speakText(languageSelectionPending ? LANGUAGE_PROMPT_EN : 'Voice is ready.', 'en-US')}>
                 Test TTS
               </button>
-              <button type="button" className="secondary-button compact" onClick={stopSpeaking}>
-                Stop TTS
-              </button>
+              <button type="button" className="secondary-button compact" onClick={stopSpeaking}>Stop TTS</button>
             </div>
             <div className="voice-status-line">
               <span>STT: {speechRecognitionSupported ? 'supported' : 'not supported'}</span>
-              <span>TTS: {speechSynthesisSupported ? 'supported' : 'not supported'}</span>
+              <span>Browser TTS: {speechSynthesisSupported ? 'supported' : 'not supported'}</span>
+              <span>OpenAI TTS: {openaiTTSConfigured === null ? 'checking' : openaiTTSConfigured ? 'configured' : 'not configured'}</span>
               <span>Conversation: {voiceLanguage === 'zh-CN' ? 'Chinese' : 'English default'}</span>
               <span>Heard: {lastTranscript || 'None'}</span>
             </div>
@@ -752,26 +721,14 @@ function App() {
 
           <div className="quick-prompts">
             {DEMO_PROMPTS.map((prompt, index) => (
-              <button
-                key={prompt}
-                type="button"
-                className={`prompt-chip ${index === promptIndex ? 'active' : ''}`}
-                onClick={() => selectSuggestedPrompt(prompt, index)}
-                disabled={busyAction !== null}
-              >
+              <button key={prompt} type="button" className={`prompt-chip ${index === promptIndex ? 'active' : ''}`} onClick={() => selectSuggestedPrompt(prompt, index)} disabled={busyAction !== null}>
                 {prompt}
               </button>
             ))}
           </div>
           <div className="chat-input-row">
-            <textarea
-              value={inputText}
-              onChange={(event) => setInputText(event.target.value)}
-              placeholder="During language selection, type Chinese / 中文 for Chinese; otherwise English is used."
-            />
-            <button type="button" onClick={handleChatSubmit} disabled={busyAction !== null}>
-              发送 / Send
-            </button>
+            <textarea value={inputText} onChange={(event) => setInputText(event.target.value)} placeholder="During language selection, type Chinese / 中文 for Chinese; otherwise English is used." />
+            <button type="button" onClick={handleChatSubmit} disabled={busyAction !== null}>发送 / Send</button>
           </div>
         </section>
       </section>
@@ -785,32 +742,12 @@ function App() {
           {busyAction && <span className="status-dot neutral">BUSY: {busyAction}</span>}
         </div>
         <div className="button-grid">
-          <button type="button" onClick={handleStartVision} disabled={busyAction !== null}>
-            Start Vision
-          </button>
-          <button type="button" onClick={handleStopVision} disabled={busyAction !== null}>
-            Stop Vision
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleDemoEvent('person_close', '模拟顾客已靠近。')}
-            disabled={busyAction !== null}
-          >
-            Simulate Close
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleDemoEvent('wave', 'Simulated close-range wave greeting detected.')}
-            disabled={busyAction !== null}
-          >
-            Simulate Wave
-          </button>
-          <button type="button" onClick={handleVoiceHi} disabled={busyAction !== null}>
-            Simulate Voice Hi
-          </button>
-          <button type="button" onClick={handleResetSession} disabled={busyAction !== null}>
-            Reset Session
-          </button>
+          <button type="button" onClick={handleStartVision} disabled={busyAction !== null}>Start Vision</button>
+          <button type="button" onClick={handleStopVision} disabled={busyAction !== null}>Stop Vision</button>
+          <button type="button" onClick={() => void handleDemoEvent('person_close', '模拟顾客已靠近。')} disabled={busyAction !== null}>Simulate Close</button>
+          <button type="button" onClick={() => void handleDemoEvent('wave', 'Simulated close-range wave greeting detected.')} disabled={busyAction !== null}>Simulate Wave</button>
+          <button type="button" onClick={handleVoiceHi} disabled={busyAction !== null}>Simulate Voice Hi</button>
+          <button type="button" onClick={handleResetSession} disabled={busyAction !== null}>Reset Session</button>
         </div>
       </section>
 
@@ -825,13 +762,7 @@ function App() {
           </div>
           <div className="product-grid">
             {products.map((product) => (
-              <ProductCard
-                key={product.id}
-                product={product}
-                recommended={recommendedIds.has(product.id)}
-                selected={compareIds.includes(product.id)}
-                onToggleCompare={() => void handleCompareToggle(product.id)}
-              />
+              <ProductCard key={product.id} product={product} recommended={recommendedIds.has(product.id)} selected={compareIds.includes(product.id)} onToggleCompare={() => void handleCompareToggle(product.id)} />
             ))}
           </div>
           {compareRows.length > 0 && (
@@ -842,9 +773,7 @@ function App() {
                   {compareRows.map((row) => (
                     <tr key={row.field}>
                       <th>{row.field}</th>
-                      {compareIds.map((id) => (
-                        <td key={id}>{String(row.values[id] ?? '-')}</td>
-                      ))}
+                      {compareIds.map((id) => <td key={id}>{String(row.values[id] ?? '-')}</td>)}
                     </tr>
                   ))}
                 </tbody>
@@ -867,10 +796,7 @@ function App() {
             <InfoRow label="预算" value={profile.budget ?? '待确认'} />
             <InfoRow label="特殊需求" value={profile.special_needs.length ? profile.special_needs.join(' / ') : '待确认'} />
             <InfoRow label="关注点" value={profile.concerns.length ? profile.concerns.join(' / ') : '待确认'} />
-            <InfoRow
-              label="推荐 SKU"
-              value={profile.recommended_product_ids.length ? profile.recommended_product_ids.join(' / ') : '暂无'}
-            />
+            <InfoRow label="推荐 SKU" value={profile.recommended_product_ids.length ? profile.recommended_product_ids.join(' / ') : '暂无'} />
           </div>
           <div className="summary-card">
             <h3>Conversation Summary</h3>
@@ -904,17 +830,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-function ProductCard({
-  product,
-  recommended,
-  selected,
-  onToggleCompare,
-}: {
-  product: FlooringProduct
-  recommended: boolean
-  selected: boolean
-  onToggleCompare: () => void
-}) {
+function ProductCard({ product, recommended, selected, onToggleCompare }: { product: FlooringProduct; recommended: boolean; selected: boolean; onToggleCompare: () => void }) {
   return (
     <article className={`product-card ${recommended ? 'recommended' : ''} ${selected ? 'selected' : ''}`}>
       <div className="product-card-header">
@@ -936,9 +852,7 @@ function ProductCard({
         <span>地暖：{yesNo(product.floor_heating)}</span>
         <span>宠物：{yesNo(product.pet_friendly)}</span>
       </div>
-      <button type="button" className="secondary-button" onClick={onToggleCompare}>
-        {selected ? '取消对比' : '加入对比'}
-      </button>
+      <button type="button" className="secondary-button" onClick={onToggleCompare}>{selected ? '取消对比' : '加入对比'}</button>
     </article>
   )
 }
