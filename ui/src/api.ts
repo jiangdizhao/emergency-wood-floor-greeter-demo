@@ -11,7 +11,7 @@ export type SessionState =
   | 'SESSION_END'
 
 export type ResponseLanguage = 'zh' | 'en'
-export type TTSProvider = 'auto' | 'openai' | 'browser'
+export type TTSProvider = 'auto' | 'local' | 'openai' | 'browser'
 
 export type FlooringProduct = {
   id: string
@@ -89,10 +89,16 @@ export type CompareRow = {
 
 export type TTSStatus = {
   ok: boolean
+  local_tts_available?: boolean
+  local_tts_url?: string
+  local_tts_health_url?: string
   openai_tts_configured: boolean
-  model: string
-  voice: string
-  fallback: string
+  openai_model?: string
+  openai_voice?: string
+  model?: string
+  voice?: string
+  fallback?: string
+  auto_order?: string[]
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
