@@ -5,10 +5,11 @@
 - simulated customer session state machine
 - product catalog API
 - voice/wave greeting trigger API
-- deterministic product recommendation
+- deterministic bilingual product recommendation
 - simulated customer profile / lead save
 - real OpenCV + MediaPipe vision service for face-close and wave greeting detection
 - fullscreen React retail demo UI
+- browser Web Speech API speech recognition and SpeechSynthesis TTS
 
 ## Backend quick start
 
@@ -65,10 +66,50 @@ Current UI features:
 2. Live status cards for person, distance, stable close, wave, FPS and state.
 3. Demo fallback buttons: Start Vision, Stop Vision, Simulate Close, Simulate Wave, Simulate Voice Hi, Reset Session.
 4. Text-based AI guide chat via `/api/chat`.
-5. Product cards from `/api/products`.
-6. Recommendation highlighting.
-7. Two-product comparison via `/api/products/compare`.
-8. Customer need profile from backend session data.
+5. Browser speech recognition for Chinese Mandarin and English.
+6. Browser SpeechSynthesis TTS for AI answers.
+7. Product cards from `/api/products`.
+8. Recommendation highlighting.
+9. Two-product comparison via `/api/products/compare`.
+10. Customer need profile from backend session data.
+
+## Voice interaction
+
+Use Chrome or Edge for the most reliable Web Speech API support.
+
+Recommended flow:
+
+1. Start backend and frontend.
+2. Click `Start Vision`.
+3. Move close to the camera until the state becomes `顾客已靠近，等待问候`.
+4. Select `中文普通话 zh-CN` or `English en-US`.
+5. Click `Start Listening`.
+6. Say `你好` or `hello` while close to the camera.
+7. The AI greeter plays the welcome message and enters free conversation mode.
+8. Click `Start Listening` again and ask product questions in Chinese or English.
+
+Important behavior:
+
+- Voice greeting requires the customer to be close to the camera, same as wave greeting.
+- TTS playback is stopped before listening starts to avoid the system hearing its own answer.
+- This is push-to-talk voice interaction, not real-time barge-in interruption.
+- If browser STT fails, use the text box or demo fallback buttons.
+
+English test questions:
+
+```text
+I have pets and want flooring for a modern living room. Which floor is easy to clean?
+Which option is better for underfloor heating, SPC, laminate, or engineered wood?
+What is the difference between SPC flooring and engineered wood?
+```
+
+Chinese test questions:
+
+```text
+家里有宠物，客厅用，现代简约，预算中等，哪种地板好打理？
+如果家里装了地暖，应该选 SPC、强化地板还是实木？
+潮湿环境或者回南天比较严重，哪种地板更合适？
+```
 
 ## Vision service
 
@@ -212,4 +253,4 @@ curl.exe -X POST "http://127.0.0.1:8000/api/greeting/voice" `
 
 ## Current implementation status
 
-The backend is runnable and includes a real OpenCV + MediaPipe vision service. The frontend basic retail UI is implemented with camera stream, live status, text chat, product cards, comparison, customer profile and demo fallback controls. The next step is browser speech recognition and TTS.
+The backend is runnable and includes a real OpenCV + MediaPipe vision service. The frontend retail UI includes camera stream, live status, text chat, browser STT/TTS, product cards, comparison, customer profile and demo fallback controls.
