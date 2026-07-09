@@ -5,7 +5,7 @@ pydantic-settings==2.10.1
 python-dotenv==1.1.1
 orjson==3.10.18
 requests==2.32.4
-numpy==2.2.6
-opencv-python==4.12.0.88
-mediapipe==0.10.21
+numpy==1.26.4
+opencv-python==4.10.0.84
+mediapipe==0.10.14
 sse-starlette==2.1.3
