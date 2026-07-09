@@ -10,6 +10,8 @@ export type SessionState =
   | 'CONVERSATION_ACTIVE'
   | 'SESSION_END'
 
+export type ResponseLanguage = 'zh' | 'en'
+
 export type FlooringProduct = {
   id: string
   name: string
@@ -150,10 +152,10 @@ export function sendVoiceGreeting(text = '你好'): Promise<{
   })
 }
 
-export function sendChat(text: string): Promise<ChatResponse> {
+export function sendChat(text: string, responseLanguage?: ResponseLanguage): Promise<ChatResponse> {
   return requestJson('/api/chat', {
     method: 'POST',
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, response_language: responseLanguage }),
   })
 }
 
