@@ -26,8 +26,53 @@ type ChatMessage = {
   text: string
 }
 
-const WELCOME_MESSAGE =
+type VoiceLanguage = 'zh-CN' | 'en-US'
+type VoiceStatus = 'idle' | 'listening' | 'processing' | 'speaking' | 'error'
+
+type BrowserSpeechRecognitionAlternative = {
+  transcript: string
+  confidence?: number
+}
+
+type BrowserSpeechRecognitionResult = {
+  isFinal?: boolean
+  length: number
+  [index: number]: BrowserSpeechRecognitionAlternative
+}
+
+type BrowserSpeechRecognitionEvent = {
+  results: {
+    length: number
+    [index: number]: BrowserSpeechRecognitionResult
+  }
+}
+
+type BrowserSpeechRecognitionErrorEvent = {
+  error: string
+  message?: string
+}
+
+type BrowserSpeechRecognition = {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  maxAlternatives: number
+  start: () => void
+  stop: () => void
+  abort: () => void
+  onstart: (() => void) | null
+  onend: (() => void) | null
+  onerror: ((event: BrowserSpeechRecognitionErrorEvent) => void) | null
+  onresult: ((event: BrowserSpeechRecognitionEvent) => void) | null
+}
+
+type BrowserSpeechRecognitionConstructor = new () => BrowserSpeechRecognition
+
+const WELCOME_ZH =
   '你好，欢迎来到木地板体验区。我可以帮你了解不同木地板的材质、颜色、耐磨、防水和地暖适配情况。你可以直接问我，比如家里有宠物怎么选，或者哪种适合地暖。'
+
+const WELCOME_EN =
+  'Hello, welcome to the wood flooring experience area. I can help you compare materials, colors, wear resistance, waterproof performance, floor heating compatibility, and maintenance.'
 
 const DEMO_PROMPTS = [
   '家里有宠物，客厅用，现代简约，预算中等，哪种地板好打理？',
@@ -36,6 +81,8 @@ const DEMO_PROMPTS = [
   '我喜欢北欧原木风，卧室用，脚感舒服一点怎么选？',
   '潮湿环境或者回南天比较严重，哪种地板更合适？',
   'SPC 地板和多层实木地板有什么区别？',
+  'I have pets and want flooring for a modern living room. Which floor is easy to clean?',
+  'Which option is better for underfloor heating, SPC, laminate, or engineered wood?',
 ]
 
 const INITIAL_PROFILE: CustomerProfile = {
@@ -74,6 +121,50 @@ const INITIAL_VISION_STATUS: VisionStatus = {
   error: null,
   fps_estimate: 0,
   wave_debug: {},
+}
+
+function getRecognitionConstructor(): BrowserSpeechRecognitionConstructor | null {
+  const speechWindow = window as Window & {
+    SpeechRecognition?: BrowserSpeechRecognitionConstructor
+    webkitSpeechRecognition?: BrowserSpeechRecognitionConstructor
+  }
+  return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition ?? null
+}
+
+function extractTranscript(event: BrowserSpeechRecognitionEvent): string {
+  let transcript = ''
+  for (let i = 0; i < event.results.length; i += 1) {
+    const result = event.results[i]
+    if (result.length > 0) {
+      transcript += result[0].transcript
+    }
+  }
+  return transcript.trim()
+}
+
+function isEnglishText(text: string): boolean {
+  const asciiLetters = [...text].filter((char) => /[a-z]/i.test(char)).length
+  const cjkChars = [...text].filter((char) => char >= '\u4e00' && char <= '\u9fff').length
+  return asciiLetters > cjkChars
+}
+
+function languageFromText(text: string, fallback: VoiceLanguage): VoiceLanguage {
+  return isEnglishText(text) ? 'en-US' : fallback
+}
+
+function isGreetingText(text: string): boolean {
+  const normalized = text.toLowerCase().replace(/\s+/g, '')
+  return [
+    '你好',
+    '您好',
+    '嗨',
+    'hi',
+    'hello',
+    'hey',
+    'goodmorning',
+    'goodafternoon',
+    'goodevening',
+  ].some((keyword) => normalized.includes(keyword))
 }
 
 function formatPercent(value: number): string {
@@ -120,7 +211,16 @@ function App() {
   const [streamSrc, setStreamSrc] = useState(streamUrl())
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [voiceLanguage, setVoiceLanguage] = useState<VoiceLanguage>('zh-CN')
+  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('idle')
+  const [voiceError, setVoiceError] = useState<string | null>(null)
+  const [lastTranscript, setLastTranscript] = useState('')
+  const [ttsEnabled, setTtsEnabled] = useState(true)
   const handledGreetingRef = useRef<number | null>(null)
+  const recognitionRef = useRef<BrowserSpeechRecognition | null>(null)
+
+  const speechRecognitionSupported = useMemo(() => getRecognitionConstructor() !== null, [])
+  const speechSynthesisSupported = useMemo(() => 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window, [])
 
   const recommendedIds = useMemo(
     () => new Set(recommendedProducts.map((product) => product.id)),
@@ -168,8 +268,10 @@ function App() {
     }
 
     handledGreetingRef.current = lastWaveAt
+    const welcomeText = voiceLanguage === 'en-US' ? WELCOME_EN : WELCOME_ZH
     appendMessage('system', `视觉检测到近距离挥手问候：${visionStatus.last_wave_event ?? 'WAVE'}`)
-    appendMessage('agent', WELCOME_MESSAGE)
+    appendMessage('agent', welcomeText)
+    void speakText(welcomeText, voiceLanguage)
 
     const timer = window.setTimeout(() => {
       void runAction('intro_finished', async () => {
@@ -180,7 +282,7 @@ function App() {
     }, 800)
 
     return () => window.clearTimeout(timer)
-  }, [visionStatus.distance, visionStatus.last_wave_at, visionStatus.last_wave_event, visionStatus.stable_close, visionStatus.state])
+  }, [visionStatus.distance, visionStatus.last_wave_at, visionStatus.last_wave_event, visionStatus.stable_close, visionStatus.state, voiceLanguage])
 
   async function refreshCatalogAndSession() {
     await runAction('refresh', async () => {
@@ -228,6 +330,146 @@ function App() {
     }
   }
 
+  async function speakText(text: string, languageOverride?: VoiceLanguage): Promise<void> {
+    if (!ttsEnabled || !text.trim()) {
+      return
+    }
+    if (!speechSynthesisSupported) {
+      setVoiceError('This browser does not support SpeechSynthesis TTS.')
+      setVoiceStatus('error')
+      return
+    }
+
+    window.speechSynthesis.cancel()
+    const utterance = new SpeechSynthesisUtterance(text)
+    const lang = languageOverride ?? languageFromText(text, voiceLanguage)
+    utterance.lang = lang
+    utterance.rate = lang === 'en-US' ? 0.95 : 1.0
+    utterance.pitch = 1.0
+
+    await new Promise<void>((resolve) => {
+      utterance.onstart = () => {
+        setVoiceStatus('speaking')
+        setVoiceError(null)
+      }
+      utterance.onend = () => {
+        setVoiceStatus('idle')
+        resolve()
+      }
+      utterance.onerror = (event) => {
+        setVoiceError(`TTS error: ${event.error}`)
+        setVoiceStatus('error')
+        resolve()
+      }
+      window.speechSynthesis.speak(utterance)
+    })
+  }
+
+  function stopSpeaking() {
+    if (speechSynthesisSupported) {
+      window.speechSynthesis.cancel()
+    }
+    setVoiceStatus('idle')
+  }
+
+  function stopListening() {
+    recognitionRef.current?.stop()
+    recognitionRef.current = null
+    setVoiceStatus('idle')
+  }
+
+  async function startListening() {
+    const Recognition = getRecognitionConstructor()
+    if (!Recognition) {
+      setVoiceError('This browser does not support Web Speech Recognition. Please use Chrome or Edge, or use text input.')
+      setVoiceStatus('error')
+      return
+    }
+
+    stopSpeaking()
+    recognitionRef.current?.abort()
+
+    const recognition = new Recognition()
+    recognitionRef.current = recognition
+    recognition.lang = voiceLanguage
+    recognition.continuous = false
+    recognition.interimResults = false
+    recognition.maxAlternatives = 1
+
+    recognition.onstart = () => {
+      setVoiceStatus('listening')
+      setVoiceError(null)
+    }
+    recognition.onerror = (event) => {
+      setVoiceError(`STT error: ${event.error}${event.message ? ` - ${event.message}` : ''}`)
+      setVoiceStatus('error')
+      recognitionRef.current = null
+    }
+    recognition.onend = () => {
+      recognitionRef.current = null
+      setVoiceStatus((current) => (current === 'listening' ? 'idle' : current))
+    }
+    recognition.onresult = (event) => {
+      const transcript = extractTranscript(event)
+      setLastTranscript(transcript)
+      if (!transcript) {
+        setVoiceStatus('idle')
+        return
+      }
+      setVoiceStatus('processing')
+      void handleRecognizedSpeech(transcript)
+    }
+
+    try {
+      recognition.start()
+    } catch (err) {
+      setVoiceError(err instanceof Error ? err.message : String(err))
+      setVoiceStatus('error')
+    }
+  }
+
+  async function handleRecognizedSpeech(transcript: string) {
+    const trimmed = transcript.trim()
+    if (!trimmed) {
+      return
+    }
+
+    const isGreeting = isGreetingText(trimmed)
+    const closeReady =
+      visionStatus.state === 'PERSON_CLOSE_WAITING_GREETING' && visionStatus.distance === 'CLOSE' && visionStatus.stable_close
+
+    if (isGreeting && visionStatus.state !== 'CONVERSATION_ACTIVE') {
+      appendMessage('customer', trimmed)
+      if (!closeReady) {
+        const message =
+          voiceLanguage === 'en-US'
+            ? 'Please move closer to the screen first, then say hello or wave. This prevents accidental activation from a distance.'
+            : '请先靠近屏幕，再说你好或挥手。这样可以避免远距离误触发。'
+        appendMessage('system', message)
+        await speakText(message, voiceLanguage)
+        return
+      }
+
+      const result = await sendVoiceGreeting(trimmed)
+      appendMessage('agent', result.message)
+      await speakText(result.message, languageFromText(result.message, voiceLanguage))
+      await sendDemoEvent('intro_finished')
+      const session = await getSessionStatus()
+      setProfile(session.customer_profile)
+      const status = await getVisionStatus()
+      setVisionStatus(status)
+      return
+    }
+
+    appendMessage('customer', trimmed)
+    const response = await sendChat(trimmed)
+    appendMessage('agent', response.answer)
+    setRecommendedProducts(response.recommended_products)
+    setProfile(response.customer_profile)
+    advanceSuggestedPrompt()
+    await speakText(response.answer, languageFromText(response.answer, voiceLanguage))
+  }
+
   async function handleStartVision() {
     await runAction('startVision', async () => {
       await startVision()
@@ -250,6 +492,8 @@ function App() {
   async function handleResetSession() {
     await runAction('resetSession', async () => {
       await stopVision().catch(() => undefined)
+      stopSpeaking()
+      recognitionRef.current?.abort()
       const session = await resetSession()
       handledGreetingRef.current = null
       setVisionStatus(INITIAL_VISION_STATUS)
@@ -259,6 +503,9 @@ function App() {
       setCompareRows([])
       setPromptIndex(0)
       setInputText(DEMO_PROMPTS[0])
+      setLastTranscript('')
+      setVoiceError(null)
+      setVoiceStatus('idle')
       setMessages([
         {
           id: 'm-reset',
@@ -278,7 +525,9 @@ function App() {
       setVisionStatus(status)
       appendMessage('system', label)
       if (event === 'wave' || event === 'greeting') {
-        appendMessage('agent', WELCOME_MESSAGE)
+        const welcomeText = voiceLanguage === 'en-US' ? WELCOME_EN : WELCOME_ZH
+        appendMessage('agent', welcomeText)
+        await speakText(welcomeText, voiceLanguage)
         await sendDemoEvent('intro_finished')
       }
     })
@@ -286,9 +535,11 @@ function App() {
 
   async function handleVoiceHi() {
     await runAction('voiceHi', async () => {
-      const result = await sendVoiceGreeting('你好')
-      appendMessage('customer', '你好')
+      const greeting = voiceLanguage === 'en-US' ? 'hello' : '你好'
+      const result = await sendVoiceGreeting(greeting)
+      appendMessage('customer', greeting)
       appendMessage('agent', result.message)
+      await speakText(result.message, languageFromText(result.message, voiceLanguage))
       await sendDemoEvent('intro_finished')
       const session = await getSessionStatus()
       setProfile(session.customer_profile)
@@ -310,6 +561,7 @@ function App() {
       setRecommendedProducts(response.recommended_products)
       setProfile(response.customer_profile)
       advanceSuggestedPrompt()
+      await speakText(response.answer, languageFromText(response.answer, voiceLanguage))
     })
   }
 
@@ -344,6 +596,7 @@ function App() {
       </header>
 
       {error && <div className="error-banner">{error}</div>}
+      {voiceError && <div className="error-banner">{voiceError}</div>}
 
       <section className="dashboard-grid">
         <section className="panel camera-panel">
@@ -377,9 +630,9 @@ function App() {
           <div className="panel-title-row">
             <div>
               <h2>AI 导购对话</h2>
-              <p>当前阶段先支持文本输入和模拟语音问候；下一步接入浏览器语音。</p>
+              <p>支持中英文语音识别、TTS 播报和文本输入。语音唤醒同样要求顾客已靠近。</p>
             </div>
-            <span className="status-dot neutral">TEXT MODE</span>
+            <span className="status-dot neutral">VOICE: {voiceStatus.toUpperCase()}</span>
           </div>
           <div className="chat-log">
             {messages.map((message) => (
@@ -389,6 +642,51 @@ function App() {
               </div>
             ))}
           </div>
+
+          <div className="voice-controls">
+            <div className="voice-config-row">
+              <label>
+                语音语言 / Language
+                <select value={voiceLanguage} onChange={(event) => setVoiceLanguage(event.target.value as VoiceLanguage)}>
+                  <option value="zh-CN">中文普通话 zh-CN</option>
+                  <option value="en-US">English en-US</option>
+                </select>
+              </label>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={ttsEnabled}
+                  onChange={(event) => setTtsEnabled(event.target.checked)}
+                />
+                TTS 播报
+              </label>
+            </div>
+            <div className="voice-button-row">
+              <button type="button" onClick={() => void startListening()} disabled={!speechRecognitionSupported || voiceStatus === 'listening'}>
+                Start Listening
+              </button>
+              <button type="button" className="secondary-button compact" onClick={stopListening} disabled={voiceStatus !== 'listening'}>
+                Stop Listening
+              </button>
+              <button
+                type="button"
+                className="secondary-button compact"
+                onClick={() => void speakText(voiceLanguage === 'en-US' ? 'Voice is ready.' : '语音已启用。', voiceLanguage)}
+                disabled={!speechSynthesisSupported}
+              >
+                Test TTS
+              </button>
+              <button type="button" className="secondary-button compact" onClick={stopSpeaking}>
+                Stop TTS
+              </button>
+            </div>
+            <div className="voice-status-line">
+              <span>STT: {speechRecognitionSupported ? 'supported' : 'not supported'}</span>
+              <span>TTS: {speechSynthesisSupported ? 'supported' : 'not supported'}</span>
+              <span>Heard: {lastTranscript || 'None'}</span>
+            </div>
+          </div>
+
           <div className="quick-prompts">
             {DEMO_PROMPTS.map((prompt, index) => (
               <button
@@ -406,7 +704,7 @@ function App() {
             <textarea
               value={inputText}
               onChange={(event) => setInputText(event.target.value)}
-              placeholder="输入顾客问题，例如：家里有宠物，哪种地板好打理？"
+              placeholder="输入顾客问题，例如：家里有宠物，哪种地板好打理？ / Ask in Chinese or English."
             />
             <button type="button" onClick={handleChatSubmit} disabled={busyAction !== null}>
               发送问题
