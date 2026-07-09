@@ -29,6 +29,15 @@ type ChatMessage = {
 const WELCOME_MESSAGE =
   '你好，欢迎来到木地板体验区。我可以帮你了解不同木地板的材质、颜色、耐磨、防水和地暖适配情况。你可以直接问我，比如家里有宠物怎么选，或者哪种适合地暖。'
 
+const DEMO_PROMPTS = [
+  '家里有宠物，客厅用，现代简约，预算中等，哪种地板好打理？',
+  '如果家里装了地暖，应该选 SPC、强化地板还是实木？',
+  '预算有限但想要耐磨一点，适合推荐哪款？',
+  '我喜欢北欧原木风，卧室用，脚感舒服一点怎么选？',
+  '潮湿环境或者回南天比较严重，哪种地板更合适？',
+  'SPC 地板和多层实木地板有什么区别？',
+]
+
 const INITIAL_PROFILE: CustomerProfile = {
   session_id: 'demo-session-001',
   customer_name: null,
@@ -56,6 +65,8 @@ const INITIAL_VISION_STATUS: VisionStatus = {
   face_window_size: 0,
   stable_close: false,
   wave_detected: false,
+  raw_wave_event: null,
+  raw_wave_ignored_reason: null,
   greeting_recent: false,
   last_wave_event: null,
   last_wave_at: null,
@@ -72,9 +83,9 @@ function formatPercent(value: number): string {
 function stateLabel(state: SessionState): string {
   const labels: Record<SessionState, string> = {
     IDLE: '待机',
-    PERSON_DETECTED_FAR: '检测到顾客',
+    PERSON_DETECTED_FAR: '检测到顾客，但距离较远',
     PERSON_CLOSE_WAITING_GREETING: '顾客已靠近，等待问候',
-    GREETING_RECEIVED: '已收到问候',
+    GREETING_RECEIVED: '已收到近距离问候',
     INTRODUCING_PRODUCTS: '正在介绍产品',
     CONVERSATION_ACTIVE: '自由对话中',
     SESSION_END: '会话结束',
@@ -84,6 +95,10 @@ function stateLabel(state: SessionState): string {
 
 function yesNo(value: boolean): string {
   return value ? '是' : '否'
+}
+
+function nextPromptIndex(current: number): number {
+  return (current + 1) % DEMO_PROMPTS.length
 }
 
 function App() {
@@ -98,7 +113,8 @@ function App() {
       text: '请靠近屏幕，并向我挥手或点击模拟问候按钮。我会开始介绍木地板产品。',
     },
   ])
-  const [inputText, setInputText] = useState('家里有宠物，客厅用，现代简约，预算中等，哪种地板好打理？')
+  const [promptIndex, setPromptIndex] = useState(0)
+  const [inputText, setInputText] = useState(DEMO_PROMPTS[0])
   const [compareIds, setCompareIds] = useState<string[]>([])
   const [compareRows, setCompareRows] = useState<CompareRow[]>([])
   const [streamSrc, setStreamSrc] = useState(streamUrl())
@@ -144,12 +160,15 @@ function App() {
     if (visionStatus.state !== 'GREETING_RECEIVED' || lastWaveAt === null) {
       return
     }
+    if (!visionStatus.stable_close || visionStatus.distance !== 'CLOSE') {
+      return
+    }
     if (handledGreetingRef.current === lastWaveAt) {
       return
     }
 
     handledGreetingRef.current = lastWaveAt
-    appendMessage('system', `视觉检测到挥手问候：${visionStatus.last_wave_event ?? 'WAVE'}`)
+    appendMessage('system', `视觉检测到近距离挥手问候：${visionStatus.last_wave_event ?? 'WAVE'}`)
     appendMessage('agent', WELCOME_MESSAGE)
 
     const timer = window.setTimeout(() => {
@@ -161,7 +180,7 @@ function App() {
     }, 800)
 
     return () => window.clearTimeout(timer)
-  }, [visionStatus.last_wave_at, visionStatus.last_wave_event, visionStatus.state])
+  }, [visionStatus.distance, visionStatus.last_wave_at, visionStatus.last_wave_event, visionStatus.stable_close, visionStatus.state])
 
   async function refreshCatalogAndSession() {
     await runAction('refresh', async () => {
@@ -184,6 +203,19 @@ function App() {
     ])
   }
 
+  function advanceSuggestedPrompt() {
+    setPromptIndex((current) => {
+      const next = nextPromptIndex(current)
+      setInputText(DEMO_PROMPTS[next])
+      return next
+    })
+  }
+
+  function selectSuggestedPrompt(prompt: string, index: number) {
+    setPromptIndex(index)
+    setInputText(prompt)
+  }
+
   async function runAction(label: string, action: () => Promise<void>) {
     setBusyAction(label)
     setError(null)
@@ -202,7 +234,7 @@ function App() {
       setStreamSrc(streamUrl())
       const status = await getVisionStatus()
       setVisionStatus(status)
-      appendMessage('system', '视觉服务已启动。请靠近摄像头并挥手。')
+      appendMessage('system', '视觉服务已启动。请靠近摄像头并挥手。只有近距离挥手才会开启对话。')
     })
   }
 
@@ -225,6 +257,8 @@ function App() {
       setRecommendedProducts([])
       setCompareIds([])
       setCompareRows([])
+      setPromptIndex(0)
+      setInputText(DEMO_PROMPTS[0])
       setMessages([
         {
           id: 'm-reset',
@@ -275,6 +309,7 @@ function App() {
       appendMessage('agent', response.answer)
       setRecommendedProducts(response.recommended_products)
       setProfile(response.customer_profile)
+      advanceSuggestedPrompt()
     })
   }
 
@@ -315,7 +350,7 @@ function App() {
           <div className="panel-title-row">
             <div>
               <h2>摄像头与视觉检测</h2>
-              <p>Backend OpenCV + MediaPipe 独占摄像头，前端显示 MJPEG 流。</p>
+              <p>Backend OpenCV + MediaPipe 独占摄像头；只有 CLOSE + stable=True 的挥手会触发问候。</p>
             </div>
             <span className={`status-dot ${visionStatus.running ? 'on' : 'off'}`}>
               {visionStatus.running ? 'RUNNING' : 'STOPPED'}
@@ -331,7 +366,9 @@ function App() {
             <Metric label="Stable Close" value={visionStatus.stable_close ? 'TRUE' : 'FALSE'} />
             <Metric label="Face Height" value={formatPercent(visionStatus.face_height_ratio)} />
             <Metric label="Face Area" value={formatPercent(visionStatus.face_area_ratio)} />
-            <Metric label="Wave" value={visionStatus.wave_detected ? 'YES' : 'NO'} />
+            <Metric label="Accepted Wave" value={visionStatus.wave_detected ? 'YES' : 'NO'} />
+            <Metric label="Raw Wave" value={visionStatus.raw_wave_event ?? 'NONE'} />
+            <Metric label="Ignored" value={visionStatus.raw_wave_ignored_reason ?? 'NONE'} />
             <Metric label="FPS" value={visionStatus.fps_estimate.toFixed(1)} />
           </div>
         </section>
@@ -350,6 +387,19 @@ function App() {
                 <span>{message.role === 'agent' ? 'AI 导购' : message.role === 'customer' ? '顾客' : '系统'}</span>
                 <p>{message.text}</p>
               </div>
+            ))}
+          </div>
+          <div className="quick-prompts">
+            {DEMO_PROMPTS.map((prompt, index) => (
+              <button
+                key={prompt}
+                type="button"
+                className={`prompt-chip ${index === promptIndex ? 'active' : ''}`}
+                onClick={() => selectSuggestedPrompt(prompt, index)}
+                disabled={busyAction !== null}
+              >
+                {prompt}
+              </button>
             ))}
           </div>
           <div className="chat-input-row">
