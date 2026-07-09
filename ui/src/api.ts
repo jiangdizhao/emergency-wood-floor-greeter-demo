@@ -54,6 +54,8 @@ export type VisionStatus = {
   face_window_size: number
   stable_close: boolean
   wave_detected: boolean
+  raw_wave_event?: string | null
+  raw_wave_ignored_reason?: string | null
   greeting_recent?: boolean
   last_wave_event: string | null
   last_wave_at: number | null
