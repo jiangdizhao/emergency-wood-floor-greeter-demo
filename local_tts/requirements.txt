@@ -1,0 +1,7 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+pydantic==2.11.7
+soundfile
+kokoro>=0.9.4
+misaki[en]
+misaki[zh]
