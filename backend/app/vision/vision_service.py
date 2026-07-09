@@ -23,6 +23,9 @@ class VisionConfig:
     mirror: bool = True
     jpeg_quality: int = 80
     loop_sleep_seconds: float = 0.005
+    greeting_banner_seconds: float = 2.0
+    greeting_state_hold_seconds: float = 4.0
+    reset_state_on_start: bool = True
 
 
 @dataclass
@@ -38,6 +41,7 @@ class VisionStatus:
     face_window_size: int = 0
     stable_close: bool = False
     wave_detected: bool = False
+    greeting_recent: bool = False
     last_wave_event: str | None = None
     last_wave_at: float | None = None
     state: str = SessionState.IDLE.value
@@ -58,6 +62,7 @@ class VisionStatus:
             "face_window_size": self.face_window_size,
             "stable_close": self.stable_close,
             "wave_detected": self.wave_detected,
+            "greeting_recent": self.greeting_recent,
             "last_wave_event": self.last_wave_event,
             "last_wave_at": self.last_wave_at,
             "state": self.state,
@@ -86,6 +91,8 @@ class VisionService:
         self._cap: cv2.VideoCapture | None = None
         self._latest_jpeg: bytes = self._make_placeholder_frame("Vision service is stopped")
         self._status = VisionStatus(state=self.state_machine.state.value)
+        self._last_accepted_wave_at: float | None = None
+        self._last_accepted_wave_event: str | None = None
 
     def start(self) -> dict[str, Any]:
         with self._lock:
@@ -95,6 +102,10 @@ class VisionService:
             self._stop_event.clear()
             self.face_estimator.reset()
             self.wave_detector.reset()
+            self._last_accepted_wave_at = None
+            self._last_accepted_wave_event = None
+            if self.config.reset_state_on_start:
+                self.state_machine.handle_event("reset")
             self._status = VisionStatus(ok=True, running=True, state=self.state_machine.state.value)
             self._thread = threading.Thread(target=self._run_loop, name="VisionService", daemon=True)
             self._thread.start()
@@ -109,15 +120,18 @@ class VisionService:
             self._release_camera_locked()
             self._status.running = False
             self._status.camera_opened = False
+            self._status.greeting_recent = False
             self._status.state = self.state_machine.state.value
             self._latest_jpeg = self._make_placeholder_frame("Vision service is stopped")
             status = self._status.to_dict()
         return {"ok": True, "message": "vision service stopped", "status": status}
 
     def get_status(self) -> dict[str, Any]:
+        now = time.time()
         with self._lock:
             status = self._status.to_dict()
         status["state"] = self.state_machine.state.value
+        status["greeting_recent"] = self._is_recent_greeting(now)
         return status
 
     def mjpeg_generator(self) -> Iterator[bytes]:
@@ -181,16 +195,26 @@ class VisionService:
                     face_status = self.face_estimator.update_from_mediapipe_detections(face_results.detections)
 
                     hand_results = hands.process(rgb)
-                    wave_event: str | None = None
+                    raw_wave_event: str | None = None
                     if hand_results.multi_hand_landmarks:
                         hand_landmarks = hand_results.multi_hand_landmarks[0]
-                        wave_event = self.wave_detector.update_from_hand_landmarks(now, hand_landmarks)
+                        raw_wave_event = self.wave_detector.update_from_hand_landmarks(now, hand_landmarks)
                         mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
                     else:
                         self.wave_detector.update_no_hand()
 
-                    self._update_state_machine(face_status=face_status, wave_event=wave_event)
-                    self._draw_overlay(frame, face_status=face_status, wave_event=wave_event)
+                    accepted_wave_event = self._update_state_machine(
+                        face_status=face_status,
+                        raw_wave_event=raw_wave_event,
+                        now=now,
+                    )
+                    greeting_recent = self._is_recent_greeting(now)
+                    self._draw_overlay(
+                        frame,
+                        face_status=face_status,
+                        wave_event=accepted_wave_event,
+                        greeting_recent=greeting_recent,
+                    )
 
                     encoded = self._encode_jpeg(frame)
                     frame_counter += 1
@@ -213,9 +237,10 @@ class VisionService:
                             face_close_votes=face_status.close_votes,
                             face_window_size=face_status.window_size,
                             stable_close=face_status.stable_close,
-                            wave_detected=wave_event is not None,
-                            last_wave_event=wave_event or self._status.last_wave_event,
-                            last_wave_at=now if wave_event else self._status.last_wave_at,
+                            wave_detected=accepted_wave_event is not None,
+                            greeting_recent=greeting_recent,
+                            last_wave_event=self._last_accepted_wave_event,
+                            last_wave_at=self._last_accepted_wave_at,
                             state=self.state_machine.state.value,
                             error=None,
                             fps_estimate=fps_estimate,
@@ -231,6 +256,7 @@ class VisionService:
                 self._release_camera_locked()
                 self._status.running = False
                 self._status.camera_opened = False
+                self._status.greeting_recent = False
                 self._status.state = self.state_machine.state.value
 
     def _open_camera(self) -> None:
@@ -259,7 +285,7 @@ class VisionService:
                 pass
             self._cap = None
 
-    def _update_state_machine(self, face_status: FaceDistanceStatus, wave_event: str | None) -> None:
+    def _update_state_machine(self, face_status: FaceDistanceStatus, raw_wave_event: str | None, now: float) -> str | None:
         current = self.state_machine.state
 
         if face_status.person_detected and face_status.stable_close:
@@ -268,10 +294,28 @@ class VisionService:
         elif face_status.person_detected and current in {SessionState.IDLE, SessionState.SESSION_END}:
             self.state_machine.handle_event("person_far")
 
-        if wave_event and self.state_machine.state == SessionState.PERSON_CLOSE_WAITING_GREETING:
-            self.state_machine.handle_event("wave")
+        if self.state_machine.state == SessionState.GREETING_RECEIVED and self._last_accepted_wave_at is not None:
+            if now - self._last_accepted_wave_at > self.config.greeting_state_hold_seconds:
+                self.state_machine.handle_event("greeting_timeout")
 
-    def _draw_overlay(self, frame: np.ndarray, face_status: FaceDistanceStatus, wave_event: str | None) -> None:
+        if raw_wave_event and self.state_machine.state == SessionState.PERSON_CLOSE_WAITING_GREETING:
+            self.state_machine.handle_event("wave")
+            self._last_accepted_wave_at = now
+            self._last_accepted_wave_event = raw_wave_event
+            return raw_wave_event
+
+        return None
+
+    def _is_recent_greeting(self, now: float) -> bool:
+        return self._last_accepted_wave_at is not None and (now - self._last_accepted_wave_at) <= self.config.greeting_banner_seconds
+
+    def _draw_overlay(
+        self,
+        frame: np.ndarray,
+        face_status: FaceDistanceStatus,
+        wave_event: str | None,
+        greeting_recent: bool,
+    ) -> None:
         h, w = frame.shape[:2]
         if face_status.bbox:
             x1 = int(max(face_status.bbox["xmin"], 0.0) * w)
@@ -292,7 +336,7 @@ class VisionService:
             cv2.putText(frame, line, (18, y), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
             y += 28
 
-        if self.state_machine.state == SessionState.GREETING_RECEIVED:
+        if greeting_recent:
             cv2.putText(frame, "Greeting detected", (18, h - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
     def _set_error(self, message: str) -> None:
