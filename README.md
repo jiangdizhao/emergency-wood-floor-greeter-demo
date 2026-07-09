@@ -14,15 +14,18 @@
 ```powershell
 cd backend
 conda activate woodfloor
-python -m pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-If you previously installed the older vision dependencies, reinstall these pinned versions:
+Important: do not reinstall or downgrade the verified vision environment unless explicitly needed. The current verified environment is:
 
-```powershell
-python -m pip install --upgrade --force-reinstall -r requirements.txt
+```text
+mediapipe==0.10.13
+numpy==2.4.6
+opencv-python==4.13.0.92
 ```
+
+`requirements.txt` records these user-verified versions. If your local environment already has them installed and working, do not run `--force-reinstall`.
 
 Open:
 
