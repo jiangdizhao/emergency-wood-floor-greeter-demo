@@ -16,6 +16,7 @@ import {
   type CompareRow,
   type CustomerProfile,
   type FlooringProduct,
+  type ResponseLanguage,
   type SessionState,
   type VisionStatus,
 } from './api'
@@ -68,21 +69,24 @@ type BrowserSpeechRecognition = {
 
 type BrowserSpeechRecognitionConstructor = new () => BrowserSpeechRecognition
 
+const LANGUAGE_PROMPT_EN =
+  'Which language would you like to use, Chinese or English? English is the default. Say Chinese or 中文 to use Chinese. Otherwise, I will continue in English.'
+
 const WELCOME_ZH =
-  '你好，欢迎来到木地板体验区。我可以帮你了解不同木地板的材质、颜色、耐磨、防水和地暖适配情况。你可以直接问我，比如家里有宠物怎么选，或者哪种适合地暖。'
+  '好的，后续我会用中文为您服务。欢迎来到木地板体验区。我可以帮您比较材质、颜色、耐磨、防水、地暖适配和日常维护。您可以直接问我家里有宠物怎么选，或者哪种适合地暖。'
 
 const WELCOME_EN =
-  'Hello, welcome to the wood flooring experience area. I can help you compare materials, colors, wear resistance, waterproof performance, floor heating compatibility, and maintenance.'
+  'Great, I will continue in English. Welcome to the wood flooring experience area. I can help you compare materials, colors, wear resistance, waterproof performance, floor heating compatibility, and maintenance.'
 
 const DEMO_PROMPTS = [
+  'I have pets and want flooring for a modern living room. Which floor is easy to clean?',
+  'Which option is better for underfloor heating, SPC, laminate, or engineered wood?',
+  'What is the difference between SPC flooring and engineered wood?',
   '家里有宠物，客厅用，现代简约，预算中等，哪种地板好打理？',
   '如果家里装了地暖，应该选 SPC、强化地板还是实木？',
   '预算有限但想要耐磨一点，适合推荐哪款？',
   '我喜欢北欧原木风，卧室用，脚感舒服一点怎么选？',
   '潮湿环境或者回南天比较严重，哪种地板更合适？',
-  'SPC 地板和多层实木地板有什么区别？',
-  'I have pets and want flooring for a modern living room. Which floor is easy to clean?',
-  'Which option is better for underfloor heating, SPC, laminate, or engineered wood?',
 ]
 
 const INITIAL_PROFILE: CustomerProfile = {
@@ -152,6 +156,15 @@ function languageFromText(text: string, fallback: VoiceLanguage): VoiceLanguage 
   return isEnglishText(text) ? 'en-US' : fallback
 }
 
+function responseLanguageFromVoiceLanguage(language: VoiceLanguage): ResponseLanguage {
+  return language === 'zh-CN' ? 'zh' : 'en'
+}
+
+function wantsChinese(text: string): boolean {
+  const normalized = text.toLowerCase().replace(/\s+/g, '')
+  return ['中文', '普通话', 'chinese', 'mandarin', 'zhongwen'].some((keyword) => normalized.includes(keyword))
+}
+
 function isGreetingText(text: string): boolean {
   const normalized = text.toLowerCase().replace(/\s+/g, '')
   return [
@@ -177,7 +190,7 @@ function stateLabel(state: SessionState): string {
     PERSON_DETECTED_FAR: '检测到顾客，但距离较远',
     PERSON_CLOSE_WAITING_GREETING: '顾客已靠近，等待问候',
     GREETING_RECEIVED: '已收到近距离问候',
-    INTRODUCING_PRODUCTS: '正在介绍产品',
+    INTRODUCING_PRODUCTS: '等待语言选择 / 正在介绍',
     CONVERSATION_ACTIVE: '自由对话中',
     SESSION_END: '会话结束',
   }
@@ -192,6 +205,10 @@ function nextPromptIndex(current: number): number {
   return (current + 1) % DEMO_PROMPTS.length
 }
 
+function welcomeForLanguage(language: VoiceLanguage): string {
+  return language === 'zh-CN' ? WELCOME_ZH : WELCOME_EN
+}
+
 function App() {
   const [visionStatus, setVisionStatus] = useState<VisionStatus>(INITIAL_VISION_STATUS)
   const [products, setProducts] = useState<FlooringProduct[]>([])
@@ -201,7 +218,7 @@ function App() {
     {
       id: 'm-welcome',
       role: 'agent',
-      text: '请靠近屏幕，并向我挥手或点击模拟问候按钮。我会开始介绍木地板产品。',
+      text: 'Please move close to the screen and say hello or wave. I will ask you to choose Chinese or English before the product conversation starts.',
     },
   ])
   const [promptIndex, setPromptIndex] = useState(0)
@@ -211,7 +228,8 @@ function App() {
   const [streamSrc, setStreamSrc] = useState(streamUrl())
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [voiceLanguage, setVoiceLanguage] = useState<VoiceLanguage>('zh-CN')
+  const [voiceLanguage, setVoiceLanguage] = useState<VoiceLanguage>('en-US')
+  const [languageSelectionPending, setLanguageSelectionPending] = useState(false)
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('idle')
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const [lastTranscript, setLastTranscript] = useState('')
@@ -268,21 +286,8 @@ function App() {
     }
 
     handledGreetingRef.current = lastWaveAt
-    const welcomeText = voiceLanguage === 'en-US' ? WELCOME_EN : WELCOME_ZH
-    appendMessage('system', `视觉检测到近距离挥手问候：${visionStatus.last_wave_event ?? 'WAVE'}`)
-    appendMessage('agent', welcomeText)
-    void speakText(welcomeText, voiceLanguage)
-
-    const timer = window.setTimeout(() => {
-      void runAction('intro_finished', async () => {
-        await sendDemoEvent('intro_finished')
-        const session = await getSessionStatus()
-        setProfile(session.customer_profile)
-      })
-    }, 800)
-
-    return () => window.clearTimeout(timer)
-  }, [visionStatus.distance, visionStatus.last_wave_at, visionStatus.last_wave_event, visionStatus.stable_close, visionStatus.state, voiceLanguage])
+    void beginLanguageSelection(`视觉检测到近距离挥手问候：${visionStatus.last_wave_event ?? 'WAVE'}`)
+  }, [visionStatus.distance, visionStatus.last_wave_at, visionStatus.last_wave_event, visionStatus.stable_close, visionStatus.state])
 
   async function refreshCatalogAndSession() {
     await runAction('refresh', async () => {
@@ -378,6 +383,37 @@ function App() {
     setVoiceStatus('idle')
   }
 
+  async function beginLanguageSelection(source: string) {
+    setLanguageSelectionPending(true)
+    setVoiceLanguage('en-US')
+    appendMessage('system', source)
+    appendMessage('agent', LANGUAGE_PROMPT_EN)
+    await sendDemoEvent('intro_started').catch(() => undefined)
+    void speakText(LANGUAGE_PROMPT_EN, 'en-US')
+  }
+
+  async function completeLanguageSelection(rawText: string) {
+    const selectedLanguage: VoiceLanguage = wantsChinese(rawText) ? 'zh-CN' : 'en-US'
+    const selectedMessage =
+      selectedLanguage === 'zh-CN'
+        ? 'Language selected: Chinese. 后续将使用中文对话。'
+        : 'Language selected: English. I will continue in English.'
+    const welcomeText = welcomeForLanguage(selectedLanguage)
+
+    setVoiceLanguage(selectedLanguage)
+    setLanguageSelectionPending(false)
+    appendMessage('customer', rawText || '(default English)')
+    appendMessage('system', selectedMessage)
+    appendMessage('agent', welcomeText)
+
+    await sendDemoEvent('intro_finished')
+    const session = await getSessionStatus()
+    const status = await getVisionStatus()
+    setProfile(session.customer_profile)
+    setVisionStatus(status)
+    await speakText(welcomeText, selectedLanguage)
+  }
+
   async function startListening() {
     const Recognition = getRecognitionConstructor()
     if (!Recognition) {
@@ -391,7 +427,7 @@ function App() {
 
     const recognition = new Recognition()
     recognitionRef.current = recognition
-    recognition.lang = voiceLanguage
+    recognition.lang = languageSelectionPending ? 'en-US' : voiceLanguage
     recognition.continuous = false
     recognition.interimResults = false
     recognition.maxAlternatives = 1
@@ -417,7 +453,10 @@ function App() {
         return
       }
       setVoiceStatus('processing')
-      void handleRecognizedSpeech(transcript)
+      void handleRecognizedSpeech(transcript).catch((err) => {
+        setVoiceError(err instanceof Error ? err.message : String(err))
+        setVoiceStatus('error')
+      })
     }
 
     try {
@@ -434,6 +473,11 @@ function App() {
       return
     }
 
+    if (languageSelectionPending) {
+      await completeLanguageSelection(trimmed)
+      return
+    }
+
     const isGreeting = isGreetingText(trimmed)
     const closeReady =
       visionStatus.state === 'PERSON_CLOSE_WAITING_GREETING' && visionStatus.distance === 'CLOSE' && visionStatus.stable_close
@@ -442,32 +486,31 @@ function App() {
       appendMessage('customer', trimmed)
       if (!closeReady) {
         const message =
-          voiceLanguage === 'en-US'
-            ? 'Please move closer to the screen first, then say hello or wave. This prevents accidental activation from a distance.'
-            : '请先靠近屏幕，再说你好或挥手。这样可以避免远距离误触发。'
+          voiceLanguage === 'zh-CN'
+            ? '请先靠近屏幕，再说你好或挥手。这样可以避免远距离误触发。'
+            : 'Please move closer to the screen first, then say hello or wave. This prevents accidental activation from a distance.'
         appendMessage('system', message)
         await speakText(message, voiceLanguage)
         return
       }
 
       const result = await sendVoiceGreeting(trimmed)
-      appendMessage('agent', result.message)
-      await speakText(result.message, languageFromText(result.message, voiceLanguage))
-      await sendDemoEvent('intro_finished')
-      const session = await getSessionStatus()
-      setProfile(session.customer_profile)
-      const status = await getVisionStatus()
-      setVisionStatus(status)
+      if (result.accepted) {
+        await beginLanguageSelection('Voice greeting detected. Please choose the conversation language.')
+      } else {
+        appendMessage('agent', result.message)
+        await speakText(result.message, languageFromText(result.message, voiceLanguage))
+      }
       return
     }
 
     appendMessage('customer', trimmed)
-    const response = await sendChat(trimmed)
+    const response = await sendChat(trimmed, responseLanguageFromVoiceLanguage(voiceLanguage))
     appendMessage('agent', response.answer)
     setRecommendedProducts(response.recommended_products)
     setProfile(response.customer_profile)
     advanceSuggestedPrompt()
-    await speakText(response.answer, languageFromText(response.answer, voiceLanguage))
+    await speakText(response.answer, voiceLanguage)
   }
 
   async function handleStartVision() {
@@ -476,7 +519,7 @@ function App() {
       setStreamSrc(streamUrl())
       const status = await getVisionStatus()
       setVisionStatus(status)
-      appendMessage('system', '视觉服务已启动。请靠近摄像头并挥手。只有近距离挥手才会开启对话。')
+      appendMessage('system', 'Vision service started. Please move close and wave. Only close-range greeting opens the conversation.')
     })
   }
 
@@ -485,7 +528,7 @@ function App() {
       await stopVision()
       const status = await getVisionStatus()
       setVisionStatus(status)
-      appendMessage('system', '视觉服务已停止。')
+      appendMessage('system', '视觉服务已停止。Vision service stopped.')
     })
   }
 
@@ -503,6 +546,8 @@ function App() {
       setCompareRows([])
       setPromptIndex(0)
       setInputText(DEMO_PROMPTS[0])
+      setVoiceLanguage('en-US')
+      setLanguageSelectionPending(false)
       setLastTranscript('')
       setVoiceError(null)
       setVoiceStatus('idle')
@@ -510,7 +555,7 @@ function App() {
         {
           id: 'm-reset',
           role: 'agent',
-          text: '会话已重置。请靠近屏幕并向我打招呼。',
+          text: 'Session reset. Please move close to the screen and say hello or wave. I will ask you to choose Chinese or English.',
         },
       ])
       setStreamSrc(streamUrl())
@@ -523,27 +568,26 @@ function App() {
       setProfile(response.customer_profile)
       const status = await getVisionStatus()
       setVisionStatus(status)
-      appendMessage('system', label)
       if (event === 'wave' || event === 'greeting') {
-        const welcomeText = voiceLanguage === 'en-US' ? WELCOME_EN : WELCOME_ZH
-        appendMessage('agent', welcomeText)
-        await speakText(welcomeText, voiceLanguage)
-        await sendDemoEvent('intro_finished')
+        await beginLanguageSelection(label)
+      } else {
+        appendMessage('system', label)
       }
     })
   }
 
   async function handleVoiceHi() {
     await runAction('voiceHi', async () => {
-      const greeting = voiceLanguage === 'en-US' ? 'hello' : '你好'
-      const result = await sendVoiceGreeting(greeting)
-      appendMessage('customer', greeting)
-      appendMessage('agent', result.message)
-      await speakText(result.message, languageFromText(result.message, voiceLanguage))
-      await sendDemoEvent('intro_finished')
+      const result = await sendVoiceGreeting('hello')
+      appendMessage('customer', 'hello')
+      if (result.accepted) {
+        await beginLanguageSelection('Simulated voice greeting detected.')
+      } else {
+        appendMessage('agent', result.message)
+      }
       const session = await getSessionStatus()
-      setProfile(session.customer_profile)
       const status = await getVisionStatus()
+      setProfile(session.customer_profile)
       setVisionStatus(status)
     })
   }
@@ -555,13 +599,19 @@ function App() {
     }
 
     await runAction('chat', async () => {
+      if (languageSelectionPending) {
+        await completeLanguageSelection(text)
+        advanceSuggestedPrompt()
+        return
+      }
+
       appendMessage('customer', text)
-      const response = await sendChat(text)
+      const response = await sendChat(text, responseLanguageFromVoiceLanguage(voiceLanguage))
       appendMessage('agent', response.answer)
       setRecommendedProducts(response.recommended_products)
       setProfile(response.customer_profile)
       advanceSuggestedPrompt()
-      await speakText(response.answer, languageFromText(response.answer, voiceLanguage))
+      await speakText(response.answer, voiceLanguage)
     })
   }
 
@@ -587,7 +637,7 @@ function App() {
         <div>
           <p className="eyebrow">Emergency Wood Floor Greeter Demo</p>
           <h1>木地板 AI 导购体验区</h1>
-          <p className="subtitle">靠近屏幕并挥手，AI 导购会主动欢迎，并根据顾客需求推荐产品。</p>
+          <p className="subtitle">靠近屏幕并打招呼后，系统先询问中文或英文；默认使用英文。</p>
         </div>
         <div className="server-card">
           <span>Backend</span>
@@ -630,9 +680,11 @@ function App() {
           <div className="panel-title-row">
             <div>
               <h2>AI 导购对话</h2>
-              <p>支持中英文语音识别、TTS 播报和文本输入。语音唤醒同样要求顾客已靠近。</p>
+              <p>打招呼后先选择语言。说 Chinese / 中文 使用中文，否则默认 English。</p>
             </div>
-            <span className="status-dot neutral">VOICE: {voiceStatus.toUpperCase()}</span>
+            <span className="status-dot neutral">
+              {languageSelectionPending ? 'WAITING LANGUAGE' : `VOICE: ${voiceStatus.toUpperCase()}`}
+            </span>
           </div>
           <div className="chat-log">
             {messages.map((message) => (
@@ -643,13 +695,13 @@ function App() {
             ))}
           </div>
 
-          <div className="voice-controls">
+          <div className={`voice-controls ${languageSelectionPending ? 'language-pending' : ''}`}>
             <div className="voice-config-row">
               <label>
-                语音语言 / Language
+                STT Language / 语音识别语言
                 <select value={voiceLanguage} onChange={(event) => setVoiceLanguage(event.target.value as VoiceLanguage)}>
+                  <option value="en-US">English en-US / default</option>
                   <option value="zh-CN">中文普通话 zh-CN</option>
-                  <option value="en-US">English en-US</option>
                 </select>
               </label>
               <label className="checkbox-label">
@@ -661,6 +713,16 @@ function App() {
                 TTS 播报
               </label>
             </div>
+            {languageSelectionPending && (
+              <div className="language-choice-row">
+                <button type="button" onClick={() => void completeLanguageSelection('English')}>
+                  Use English / 默认英文
+                </button>
+                <button type="button" onClick={() => void completeLanguageSelection('中文')}>
+                  使用中文 / Chinese
+                </button>
+              </div>
+            )}
             <div className="voice-button-row">
               <button type="button" onClick={() => void startListening()} disabled={!speechRecognitionSupported || voiceStatus === 'listening'}>
                 Start Listening
@@ -671,7 +733,7 @@ function App() {
               <button
                 type="button"
                 className="secondary-button compact"
-                onClick={() => void speakText(voiceLanguage === 'en-US' ? 'Voice is ready.' : '语音已启用。', voiceLanguage)}
+                onClick={() => void speakText(languageSelectionPending ? LANGUAGE_PROMPT_EN : 'Voice is ready.', 'en-US')}
                 disabled={!speechSynthesisSupported}
               >
                 Test TTS
@@ -683,6 +745,7 @@ function App() {
             <div className="voice-status-line">
               <span>STT: {speechRecognitionSupported ? 'supported' : 'not supported'}</span>
               <span>TTS: {speechSynthesisSupported ? 'supported' : 'not supported'}</span>
+              <span>Conversation: {voiceLanguage === 'zh-CN' ? 'Chinese' : 'English default'}</span>
               <span>Heard: {lastTranscript || 'None'}</span>
             </div>
           </div>
@@ -704,10 +767,10 @@ function App() {
             <textarea
               value={inputText}
               onChange={(event) => setInputText(event.target.value)}
-              placeholder="输入顾客问题，例如：家里有宠物，哪种地板好打理？ / Ask in Chinese or English."
+              placeholder="During language selection, type Chinese / 中文 for Chinese; otherwise English is used."
             />
             <button type="button" onClick={handleChatSubmit} disabled={busyAction !== null}>
-              发送问题
+              发送 / Send
             </button>
           </div>
         </section>
@@ -737,7 +800,7 @@ function App() {
           </button>
           <button
             type="button"
-            onClick={() => void handleDemoEvent('wave', '模拟顾客挥手问候。')}
+            onClick={() => void handleDemoEvent('wave', 'Simulated close-range wave greeting detected.')}
             disabled={busyAction !== null}
           >
             Simulate Wave
