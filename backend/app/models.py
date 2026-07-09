@@ -82,7 +82,7 @@ class ChatResponse(BaseModel):
 class TTSRequest(BaseModel):
     text: str
     language: Literal["zh", "en"] = "en"
-    provider: Literal["openai", "browser", "auto"] = "auto"
+    provider: Literal["local", "openai", "browser", "auto"] = "auto"
     voice: str | None = None
 
 
