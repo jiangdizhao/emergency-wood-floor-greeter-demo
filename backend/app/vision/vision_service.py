@@ -41,6 +41,8 @@ class VisionStatus:
     face_window_size: int = 0
     stable_close: bool = False
     wave_detected: bool = False
+    raw_wave_event: str | None = None
+    raw_wave_ignored_reason: str | None = None
     greeting_recent: bool = False
     last_wave_event: str | None = None
     last_wave_at: float | None = None
@@ -62,6 +64,8 @@ class VisionStatus:
             "face_window_size": self.face_window_size,
             "stable_close": self.stable_close,
             "wave_detected": self.wave_detected,
+            "raw_wave_event": self.raw_wave_event,
+            "raw_wave_ignored_reason": self.raw_wave_ignored_reason,
             "greeting_recent": self.greeting_recent,
             "last_wave_event": self.last_wave_event,
             "last_wave_at": self.last_wave_at,
@@ -93,6 +97,8 @@ class VisionService:
         self._status = VisionStatus(state=self.state_machine.state.value)
         self._last_accepted_wave_at: float | None = None
         self._last_accepted_wave_event: str | None = None
+        self._last_raw_wave_event: str | None = None
+        self._last_raw_wave_ignored_reason: str | None = None
 
     def start(self) -> dict[str, Any]:
         with self._lock:
@@ -104,6 +110,8 @@ class VisionService:
             self.wave_detector.reset()
             self._last_accepted_wave_at = None
             self._last_accepted_wave_event = None
+            self._last_raw_wave_event = None
+            self._last_raw_wave_ignored_reason = None
             if self.config.reset_state_on_start:
                 self.state_machine.handle_event("reset")
             self._status = VisionStatus(ok=True, running=True, state=self.state_machine.state.value)
@@ -238,6 +246,8 @@ class VisionService:
                             face_window_size=face_status.window_size,
                             stable_close=face_status.stable_close,
                             wave_detected=accepted_wave_event is not None,
+                            raw_wave_event=self._last_raw_wave_event,
+                            raw_wave_ignored_reason=self._last_raw_wave_ignored_reason,
                             greeting_recent=greeting_recent,
                             last_wave_event=self._last_accepted_wave_event,
                             last_wave_at=self._last_accepted_wave_at,
@@ -287,24 +297,45 @@ class VisionService:
 
     def _update_state_machine(self, face_status: FaceDistanceStatus, raw_wave_event: str | None, now: float) -> str | None:
         current = self.state_machine.state
+        is_stably_close = face_status.person_detected and face_status.distance == "CLOSE" and face_status.stable_close
 
-        if face_status.person_detected and face_status.stable_close:
+        if is_stably_close:
             if current in {SessionState.IDLE, SessionState.PERSON_DETECTED_FAR, SessionState.SESSION_END}:
                 self.state_machine.handle_event("person_close")
-        elif face_status.person_detected and current in {SessionState.IDLE, SessionState.SESSION_END}:
-            self.state_machine.handle_event("person_far")
+        elif face_status.person_detected:
+            if current in {SessionState.IDLE, SessionState.PERSON_DETECTED_FAR, SessionState.PERSON_CLOSE_WAITING_GREETING, SessionState.SESSION_END}:
+                self.state_machine.handle_event("person_far")
+            self._clear_pending_greeting_if_needed()
+        else:
+            if current in {SessionState.IDLE, SessionState.PERSON_DETECTED_FAR, SessionState.PERSON_CLOSE_WAITING_GREETING, SessionState.SESSION_END}:
+                self.state_machine.handle_event("person_lost")
+            self._clear_pending_greeting_if_needed()
 
         if self.state_machine.state == SessionState.GREETING_RECEIVED and self._last_accepted_wave_at is not None:
             if now - self._last_accepted_wave_at > self.config.greeting_state_hold_seconds:
                 self.state_machine.handle_event("greeting_timeout")
 
-        if raw_wave_event and self.state_machine.state == SessionState.PERSON_CLOSE_WAITING_GREETING:
+        if raw_wave_event:
+            self._last_raw_wave_event = raw_wave_event
+            if self.state_machine.state != SessionState.PERSON_CLOSE_WAITING_GREETING:
+                self._last_raw_wave_ignored_reason = f"ignored_state_{self.state_machine.state.value}"
+                return None
+            if not is_stably_close:
+                self._last_raw_wave_ignored_reason = f"ignored_distance_{face_status.distance}_stable_{face_status.stable_close}"
+                return None
+
             self.state_machine.handle_event("wave")
             self._last_accepted_wave_at = now
             self._last_accepted_wave_event = raw_wave_event
+            self._last_raw_wave_ignored_reason = None
             return raw_wave_event
 
         return None
+
+    def _clear_pending_greeting_if_needed(self) -> None:
+        if self.state_machine.state in {SessionState.IDLE, SessionState.PERSON_DETECTED_FAR, SessionState.PERSON_CLOSE_WAITING_GREETING}:
+            self._last_accepted_wave_at = None
+            self._last_accepted_wave_event = None
 
     def _is_recent_greeting(self, now: float) -> bool:
         return self._last_accepted_wave_at is not None and (now - self._last_accepted_wave_at) <= self.config.greeting_banner_seconds
@@ -324,11 +355,15 @@ class VisionService:
             y2 = int(min(face_status.bbox["ymin"] + face_status.bbox["height"], 1.0) * h)
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
 
+        wave_text = wave_event or "NONE"
+        if self._last_raw_wave_ignored_reason and not wave_event:
+            wave_text = f"IGNORED ({self._last_raw_wave_ignored_reason})"
+
         lines = [
             f"Person: {'YES' if face_status.person_detected else 'NO'}",
             f"Distance: {face_status.distance} stable={face_status.stable_close}",
             f"Face h={face_status.face_height_ratio:.2f} area={face_status.face_area_ratio:.3f}",
-            f"Wave: {wave_event or 'NONE'} reason={self.wave_detector.debug.reason}",
+            f"Wave: {wave_text} reason={self.wave_detector.debug.reason}",
             f"State: {self.state_machine.state.value}",
         ]
         y = 28
