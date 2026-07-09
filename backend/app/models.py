@@ -68,6 +68,7 @@ class ProductCompareResponse(BaseModel):
 class ChatRequest(BaseModel):
     text: str
     session_id: str = "demo-session-001"
+    response_language: Literal["zh", "en"] | None = None
 
 
 class ChatResponse(BaseModel):
