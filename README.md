@@ -10,6 +10,7 @@
 - real OpenCV + MediaPipe vision service for face-close and wave greeting detection
 - fullscreen React retail demo UI
 - browser Web Speech API speech recognition and SpeechSynthesis TTS
+- language-choice prompt after greeting, with English as default
 
 ## Backend quick start
 
@@ -68,10 +69,11 @@ Current UI features:
 4. Text-based AI guide chat via `/api/chat`.
 5. Browser speech recognition for Chinese Mandarin and English.
 6. Browser SpeechSynthesis TTS for AI answers.
-7. Product cards from `/api/products`.
-8. Recommendation highlighting.
-9. Two-product comparison via `/api/products/compare`.
-10. Customer need profile from backend session data.
+7. Language-choice prompt after greeting: English by default; say `Chinese` or `中文` to use Chinese.
+8. Product cards from `/api/products`.
+9. Recommendation highlighting.
+10. Two-product comparison via `/api/products/compare`.
+11. Customer need profile from backend session data.
 
 ## Voice interaction
 
@@ -82,18 +84,20 @@ Recommended flow:
 1. Start backend and frontend.
 2. Click `Start Vision`.
 3. Move close to the camera until the state becomes `顾客已靠近，等待问候`.
-4. Select `中文普通话 zh-CN` or `English en-US`.
-5. Click `Start Listening`.
-6. Say `你好` or `hello` while close to the camera.
-7. The AI greeter plays the welcome message and enters free conversation mode.
-8. Click `Start Listening` again and ask product questions in Chinese or English.
+4. Say `hello` or wave while close to the camera.
+5. The AI greeter asks: `Which language would you like to use, Chinese or English? English is the default.`
+6. Say `Chinese` or type/click `中文` to use Chinese. If the user says anything else, or chooses English, the conversation continues in English.
+7. After language selection, the AI plays the welcome message in the selected language.
+8. Click `Start Listening` again and ask product questions.
 
 Important behavior:
 
+- English is the default conversation language after greeting.
+- Saying `Chinese`, `Mandarin`, `中文`, or `普通话` switches the conversation to Chinese.
 - Voice greeting requires the customer to be close to the camera, same as wave greeting.
 - TTS playback is stopped before listening starts to avoid the system hearing its own answer.
 - This is push-to-talk voice interaction, not real-time barge-in interruption.
-- If browser STT fails, use the text box or demo fallback buttons.
+- If browser STT fails, use the text box, language-choice buttons, or demo fallback buttons.
 
 English test questions:
 
@@ -134,7 +138,7 @@ Expected flow:
 1. Start the vision service.
 2. Open http://127.0.0.1:8000/api/vision/stream in a browser.
 3. Move close to the camera; status should become `PERSON_CLOSE_WAITING_GREETING`.
-4. Wave left/right; status should become `GREETING_RECEIVED`.
+4. Wave left/right; status should become `GREETING_RECEIVED` and the frontend should ask for language selection.
 
 Manual vision commands:
 
@@ -216,10 +220,20 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/greeting/voice" `
   -Body $body
 ```
 
-Ask a product question:
+Ask a product question in selected language:
 
 ```powershell
-$body = @{ text = "家里有宠物，客厅用，现代简约，预算中等，哪种地板好打理？" } | ConvertTo-Json
+$body = @{ text = "I have pets and want flooring for a modern living room. Which floor is easy to clean?"; response_language = "en" } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/chat" `
+  -Method Post `
+  -ContentType "application/json; charset=utf-8" `
+  -Body $body | ConvertTo-Json -Depth 10
+```
+
+Chinese selected-language chat:
+
+```powershell
+$body = @{ text = "家里有宠物，客厅用，现代简约，预算中等，哪种地板好打理？"; response_language = "zh" } | ConvertTo-Json
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/chat" `
   -Method Post `
   -ContentType "application/json; charset=utf-8" `
@@ -253,4 +267,4 @@ curl.exe -X POST "http://127.0.0.1:8000/api/greeting/voice" `
 
 ## Current implementation status
 
-The backend is runnable and includes a real OpenCV + MediaPipe vision service. The frontend retail UI includes camera stream, live status, text chat, browser STT/TTS, product cards, comparison, customer profile and demo fallback controls.
+The backend is runnable and includes a real OpenCV + MediaPipe vision service. The frontend retail UI includes camera stream, live status, language-choice prompt after greeting, browser STT/TTS, selected-language chat, product cards, comparison, customer profile and demo fallback controls.
