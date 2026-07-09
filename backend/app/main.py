@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
+import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from starlette.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 
 from .models import (
     ChatRequest,
@@ -18,6 +20,7 @@ from .models import (
     ProductCompareResponse,
     ProductsResponse,
     SessionStatusResponse,
+    TTSRequest,
 )
 from .services.chat_service import ChatService
 from .services.lead_service import LeadService
@@ -105,6 +108,8 @@ def root() -> dict:
             "GET /api/health",
             "GET /api/products",
             "POST /api/chat",
+            "POST /api/tts",
+            "GET /api/tts/status",
             "POST /api/greeting/voice",
             "POST /api/demo/event",
             "GET /api/session/status",
@@ -126,6 +131,7 @@ def health() -> dict:
         "state": state_machine.state.value,
         "product_count": len(product_service.list_products()),
         "vision_running": vision_service.get_status().get("running", False),
+        "openai_tts_configured": bool(os.getenv("OPENAI_API_KEY")),
     }
 
 
@@ -154,6 +160,72 @@ def debug_product_names() -> dict:
         "names": [product.name for product in product_service.list_products()],
         "types": [product.type for product in product_service.list_products()],
     }
+
+
+@app.get("/api/tts/status")
+def tts_status() -> dict:
+    return {
+        "ok": True,
+        "openai_tts_configured": bool(os.getenv("OPENAI_API_KEY")),
+        "model": os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts"),
+        "voice": os.getenv("OPENAI_TTS_VOICE", "marin"),
+        "fallback": "frontend_browser_speech_synthesis",
+    }
+
+
+@app.post("/api/tts")
+def tts(request: TTSRequest) -> Response:
+    if request.provider == "browser":
+        raise HTTPException(status_code=400, detail="Browser TTS should be handled by the frontend, not /api/tts.")
+
+    text = request.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="TTS text is empty.")
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY is not set. Frontend should fall back to browser TTS.")
+
+    model = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
+    voice = request.voice or os.getenv("OPENAI_TTS_VOICE", "marin")
+    instructions = (
+        "Speak in warm, natural, professional retail-consultant English. Keep the pace relaxed and friendly."
+        if request.language == "en"
+        else "请用自然、亲切、专业的中文门店导购语气朗读，语速适中，像真人销售顾问。"
+    )
+
+    try:
+        upstream = requests.post(
+            "https://api.openai.com/v1/audio/speech",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "voice": voice,
+                "input": text,
+                "instructions": instructions,
+                "response_format": "mp3",
+            },
+            timeout=45,
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"OpenAI TTS request failed: {exc}") from exc
+
+    if upstream.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"OpenAI TTS error {upstream.status_code}: {upstream.text[:500]}")
+
+    return Response(
+        content=upstream.content,
+        media_type="audio/mpeg",
+        headers={
+            "Cache-Control": "no-store",
+            "X-TTS-Provider": "openai",
+            "X-TTS-Model": model,
+            "X-TTS-Voice": voice,
+        },
+    )
 
 
 @app.get("/api/products", response_model=ProductsResponse)
