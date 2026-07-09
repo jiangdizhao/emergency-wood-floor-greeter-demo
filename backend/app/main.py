@@ -72,12 +72,6 @@ app.add_middleware(
 
 @app.middleware("http")
 async def force_utf8_json_content_type(request: Request, call_next):  # type: ignore[no-untyped-def]
-    """Add charset=utf-8 to JSON responses for Windows PowerShell clients.
-
-    Some PowerShell versions decode `application/json` incorrectly when the
-    charset is not explicit. This middleware is a defensive backstop in addition
-    to `UTF8JSONResponse`.
-    """
     response = await call_next(request)
     content_type = response.headers.get("content-type", "")
     if content_type.startswith("application/json") and "charset=" not in content_type.lower():
@@ -91,6 +85,91 @@ recommendation_service = RecommendationService(product_service=product_service)
 chat_service = ChatService(product_service=product_service, recommendation_service=recommendation_service)
 state_machine = StoreSessionStateMachine()
 vision_service = VisionService(state_machine=state_machine, config=VisionConfig())
+
+
+def _local_tts_url() -> str:
+    return os.getenv("LOCAL_TTS_URL", "http://127.0.0.1:8010/tts")
+
+
+def _local_tts_health_url() -> str:
+    return os.getenv("LOCAL_TTS_HEALTH_URL", "http://127.0.0.1:8010/health")
+
+
+def _local_tts_available() -> bool:
+    try:
+        response = requests.get(_local_tts_health_url(), timeout=1.0)
+        return response.ok
+    except requests.RequestException:
+        return False
+
+
+def _call_local_tts(request: TTSRequest, text: str) -> Response:
+    local_url = _local_tts_url()
+    timeout = float(os.getenv("LOCAL_TTS_TIMEOUT_SECONDS", "45"))
+    upstream = requests.post(
+        local_url,
+        json={
+            "text": text,
+            "language": request.language,
+            "voice": request.voice,
+            "speed": 1.0,
+        },
+        timeout=timeout,
+    )
+    if upstream.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Local Kokoro TTS error {upstream.status_code}: {upstream.text[:500]}")
+    return Response(
+        content=upstream.content,
+        media_type=upstream.headers.get("content-type", "audio/wav"),
+        headers={
+            "Cache-Control": "no-store",
+            "X-TTS-Provider": "local-kokoro",
+            "X-Local-TTS-URL": local_url,
+        },
+    )
+
+
+def _call_openai_tts(request: TTSRequest, text: str) -> Response:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY is not set. Frontend should fall back to browser TTS.")
+
+    model = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
+    voice = request.voice or os.getenv("OPENAI_TTS_VOICE", "marin")
+    instructions = (
+        "Speak in warm, natural, professional retail-consultant English. Keep the pace relaxed and friendly."
+        if request.language == "en"
+        else "请用自然、亲切、专业的中文门店导购语气朗读，语速适中，像真人销售顾问。"
+    )
+
+    upstream = requests.post(
+        "https://api.openai.com/v1/audio/speech",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model,
+            "voice": voice,
+            "input": text,
+            "instructions": instructions,
+            "response_format": "mp3",
+        },
+        timeout=45,
+    )
+    if upstream.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"OpenAI TTS error {upstream.status_code}: {upstream.text[:500]}")
+
+    return Response(
+        content=upstream.content,
+        media_type="audio/mpeg",
+        headers={
+            "Cache-Control": "no-store",
+            "X-TTS-Provider": "openai",
+            "X-TTS-Model": model,
+            "X-TTS-Voice": voice,
+        },
+    )
 
 
 @app.on_event("shutdown")
@@ -132,12 +211,12 @@ def health() -> dict:
         "product_count": len(product_service.list_products()),
         "vision_running": vision_service.get_status().get("running", False),
         "openai_tts_configured": bool(os.getenv("OPENAI_API_KEY")),
+        "local_tts_available": _local_tts_available(),
     }
 
 
 @app.get("/api/debug/encoding")
 def debug_encoding() -> dict:
-    """Small UTF-8 JSON endpoint for diagnosing terminal/client encoding."""
     return {
         "ok": True,
         "encoding_expected": "utf-8",
@@ -149,7 +228,6 @@ def debug_encoding() -> dict:
 
 @app.get("/api/debug/plain-utf8")
 def debug_plain_utf8() -> PlainTextResponse:
-    """Plain-text UTF-8 endpoint to separate backend encoding from JSON decoding."""
     text = "你好，木地板，云杉浅灰 SPC 锁扣地板，客厅，现代简约。\n"
     return PlainTextResponse(text, media_type="text/plain; charset=utf-8")
 
@@ -166,10 +244,13 @@ def debug_product_names() -> dict:
 def tts_status() -> dict:
     return {
         "ok": True,
+        "local_tts_available": _local_tts_available(),
+        "local_tts_url": _local_tts_url(),
+        "local_tts_health_url": _local_tts_health_url(),
         "openai_tts_configured": bool(os.getenv("OPENAI_API_KEY")),
-        "model": os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts"),
-        "voice": os.getenv("OPENAI_TTS_VOICE", "marin"),
-        "fallback": "frontend_browser_speech_synthesis",
+        "openai_model": os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts"),
+        "openai_voice": os.getenv("OPENAI_TTS_VOICE", "marin"),
+        "auto_order": ["local_kokoro", "openai", "frontend_browser_speech_synthesis"],
     }
 
 
@@ -182,50 +263,33 @@ def tts(request: TTSRequest) -> Response:
     if not text:
         raise HTTPException(status_code=400, detail="TTS text is empty.")
 
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=503, detail="OPENAI_API_KEY is not set. Frontend should fall back to browser TTS.")
+    errors: list[str] = []
 
-    model = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
-    voice = request.voice or os.getenv("OPENAI_TTS_VOICE", "marin")
-    instructions = (
-        "Speak in warm, natural, professional retail-consultant English. Keep the pace relaxed and friendly."
-        if request.language == "en"
-        else "请用自然、亲切、专业的中文门店导购语气朗读，语速适中，像真人销售顾问。"
-    )
+    if request.provider in {"local", "auto"}:
+        try:
+            return _call_local_tts(request, text)
+        except HTTPException as exc:
+            errors.append(f"local: {exc.detail}")
+            if request.provider == "local":
+                raise
+        except requests.RequestException as exc:
+            errors.append(f"local: {exc}")
+            if request.provider == "local":
+                raise HTTPException(status_code=502, detail=f"Local Kokoro TTS request failed: {exc}") from exc
 
-    try:
-        upstream = requests.post(
-            "https://api.openai.com/v1/audio/speech",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model,
-                "voice": voice,
-                "input": text,
-                "instructions": instructions,
-                "response_format": "mp3",
-            },
-            timeout=45,
-        )
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=502, detail=f"OpenAI TTS request failed: {exc}") from exc
+    if request.provider in {"openai", "auto"}:
+        try:
+            return _call_openai_tts(request, text)
+        except HTTPException as exc:
+            errors.append(f"openai: {exc.detail}")
+            if request.provider == "openai":
+                raise
+        except requests.RequestException as exc:
+            errors.append(f"openai: {exc}")
+            if request.provider == "openai":
+                raise HTTPException(status_code=502, detail=f"OpenAI TTS request failed: {exc}") from exc
 
-    if upstream.status_code >= 400:
-        raise HTTPException(status_code=502, detail=f"OpenAI TTS error {upstream.status_code}: {upstream.text[:500]}")
-
-    return Response(
-        content=upstream.content,
-        media_type="audio/mpeg",
-        headers={
-            "Cache-Control": "no-store",
-            "X-TTS-Provider": "openai",
-            "X-TTS-Model": model,
-            "X-TTS-Voice": voice,
-        },
-    )
+    raise HTTPException(status_code=503, detail="; ".join(errors) or "No TTS provider available. Frontend should fall back to browser TTS.")
 
 
 @app.get("/api/products", response_model=ProductsResponse)
@@ -263,17 +327,6 @@ def reset_session(session_id: str = "demo-session-001") -> SessionStatusResponse
 
 @app.post("/api/demo/event", response_model=SessionStatusResponse)
 def handle_demo_event(request: DemoEventRequest) -> SessionStatusResponse:
-    """Manual fallback endpoint for the demo UI.
-
-    Supported events:
-    - person_far
-    - person_close
-    - wave
-    - greeting
-    - intro_finished
-    - end
-    - reset
-    """
     result = state_machine.handle_event(request.event)
     profile = lead_service.load_profile(session_id=request.session_id)
     return SessionStatusResponse(
