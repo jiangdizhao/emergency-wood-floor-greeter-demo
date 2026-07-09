@@ -8,6 +8,7 @@
 - deterministic product recommendation
 - simulated customer profile / lead save
 - real OpenCV + MediaPipe vision service for face-close and wave greeting detection
+- fullscreen React retail demo UI
 
 ## Backend quick start
 
@@ -36,6 +37,38 @@ Open:
 - Vision status: http://127.0.0.1:8000/api/vision/status
 - UTF-8 JSON debug: http://127.0.0.1:8000/api/debug/encoding
 - UTF-8 plain-text debug: http://127.0.0.1:8000/api/debug/plain-utf8
+
+## Frontend quick start
+
+Start the backend first. Then open a second terminal:
+
+```powershell
+cd F:\emergency-wood-floor-greeter-demo\ui
+npm install
+npm run dev -- --host 127.0.0.1
+```
+
+Open:
+
+- Frontend UI: http://127.0.0.1:5173/
+
+Optional API base override:
+
+```powershell
+$env:VITE_API_BASE_URL="http://127.0.0.1:8000"
+npm run dev -- --host 127.0.0.1
+```
+
+Current UI features:
+
+1. MJPEG camera stream panel from `/api/vision/stream`.
+2. Live status cards for person, distance, stable close, wave, FPS and state.
+3. Demo fallback buttons: Start Vision, Stop Vision, Simulate Close, Simulate Wave, Simulate Voice Hi, Reset Session.
+4. Text-based AI guide chat via `/api/chat`.
+5. Product cards from `/api/products`.
+6. Recommendation highlighting.
+7. Two-product comparison via `/api/products/compare`.
+8. Customer need profile from backend session data.
 
 ## Vision service
 
@@ -179,4 +212,4 @@ curl.exe -X POST "http://127.0.0.1:8000/api/greeting/voice" `
 
 ## Current implementation status
 
-The backend is runnable and includes a real OpenCV + MediaPipe vision service. The service detects face-close status and hand-wave greetings, then updates the backend state machine. The next step is to build the frontend retail demo UI.
+The backend is runnable and includes a real OpenCV + MediaPipe vision service. The frontend basic retail UI is implemented with camera stream, live status, text chat, product cards, comparison, customer profile and demo fallback controls. The next step is browser speech recognition and TTS.
