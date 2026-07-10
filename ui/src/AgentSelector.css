@@ -1,5 +1,7 @@
 .agent-choice-mode {
   justify-content: flex-start;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding-top: 82px;
   padding-bottom: 34px;
 }
