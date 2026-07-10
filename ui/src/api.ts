@@ -182,13 +182,14 @@ export async function synthesizeSpeech(
   text: string,
   language: ResponseLanguage,
   provider: TTSProvider = 'auto',
+  voice?: string,
 ): Promise<Blob> {
   const response = await fetch(`${API_BASE_URL}/api/tts`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
     },
-    body: JSON.stringify({ text, language, provider }),
+    body: JSON.stringify({ text, language, provider, voice }),
   })
 
   if (!response.ok) {
