@@ -1,41 +1,51 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  BarChart3,
+  Check,
+  ClipboardCheck,
+  Mic,
+  RotateCcw,
+  Send,
+  Sparkles,
+  Square,
+  X,
+} from 'lucide-react'
 import './App.css'
 import {
-  API_BASE_URL,
   compareProducts,
   getProducts,
   getSessionStatus,
-  getTTSStatus,
-  getVisionStatus,
   resetSession,
   sendChat,
   sendDemoEvent,
-  sendVoiceGreeting,
   startVision,
-  stopVision,
-  streamUrl,
   synthesizeSpeech,
   type CompareRow,
   type CustomerProfile,
   type FlooringProduct,
-  type ResponseLanguage,
-  type SessionState,
-  type TTSProvider,
-  type VisionStatus,
 } from './api'
 
 type ChatMessage = {
   id: string
-  role: 'agent' | 'customer' | 'system'
+  role: 'agent' | 'customer'
   text: string
 }
 
-type VoiceLanguage = 'zh-CN' | 'en-US'
 type VoiceStatus = 'idle' | 'listening' | 'processing' | 'speaking' | 'error'
+type ScreenMode = 'welcome' | 'conversation' | 'summary'
 
 type BrowserSpeechRecognitionAlternative = { transcript: string; confidence?: number }
-type BrowserSpeechRecognitionResult = { isFinal?: boolean; length: number; [index: number]: BrowserSpeechRecognitionAlternative }
-type BrowserSpeechRecognitionEvent = { results: { length: number; [index: number]: BrowserSpeechRecognitionResult } }
+type BrowserSpeechRecognitionResult = {
+  isFinal?: boolean
+  length: number
+  [index: number]: BrowserSpeechRecognitionAlternative
+}
+type BrowserSpeechRecognitionEvent = {
+  results: {
+    length: number
+    [index: number]: BrowserSpeechRecognitionResult
+  }
+}
 type BrowserSpeechRecognitionErrorEvent = { error: string; message?: string }
 type BrowserSpeechRecognition = {
   lang: string
@@ -52,22 +62,14 @@ type BrowserSpeechRecognition = {
 }
 type BrowserSpeechRecognitionConstructor = new () => BrowserSpeechRecognition
 
-const LANGUAGE_PROMPT_EN =
-  'Which language would you like to use, Chinese or English? English is the default. Say Chinese or Mandarin to use Chinese. Otherwise, I will continue in English.'
-const WELCOME_ZH =
-  '好的，后续我会用中文为您服务。欢迎来到木地板体验区。我可以帮您比较材质、颜色、耐磨、防水、地暖适配和日常维护。您可以直接问我家里有宠物怎么选，或者哪种适合地暖。'
-const WELCOME_EN =
-  'Great, I will continue in English. Welcome to the wood flooring experience area. I can help you compare materials, colors, wear resistance, waterproof performance, floor heating compatibility, and maintenance.'
+const INTRODUCTION =
+  '您好，欢迎来到木地板体验区。我是您的 AI 选购顾问小木。我可以根据房间、装修风格、预算，以及地暖、宠物和日常清洁需求，为您推荐合适的地板。请问您这次主要想为哪个空间选择地板呢？'
 
-const DEMO_PROMPTS = [
-  'I have pets and want flooring for a modern living room. Which floor is easy to clean?',
-  'Which option is better for underfloor heating, SPC, laminate, or engineered wood?',
-  'What is the difference between SPC flooring and engineered wood?',
-  '家里有宠物，客厅用，现代简约，预算中等，哪种地板好打理？',
-  '如果家里装了地暖，应该选 SPC、强化地板还是实木？',
-  '预算有限但想要耐磨一点，适合推荐哪款？',
-  '我喜欢北欧原木风，卧室用，脚感舒服一点怎么选？',
-  '潮湿环境或者回南天比较严重，哪种地板更合适？',
+const QUICK_PROMPTS = [
+  '客厅用，家里有宠物，希望耐磨又好清洁。',
+  '卧室用，喜欢北欧原木风，想要脚感舒服。',
+  '家里有地暖，应该选哪种地板？',
+  '南方比较潮湿，想重点看看防水性能。',
 ]
 
 const INITIAL_PROFILE: CustomerProfile = {
@@ -83,29 +85,6 @@ const INITIAL_PROFILE: CustomerProfile = {
   conversation_summary: '',
   follow_up_status: '未建档',
   follow_up_suggestion: '',
-}
-
-const INITIAL_VISION_STATUS: VisionStatus = {
-  ok: true,
-  running: false,
-  camera_opened: false,
-  person_detected: false,
-  distance: 'NONE',
-  face_height_ratio: 0,
-  face_area_ratio: 0,
-  face_close_votes: 0,
-  face_window_size: 0,
-  stable_close: false,
-  wave_detected: false,
-  raw_wave_event: null,
-  raw_wave_ignored_reason: null,
-  greeting_recent: false,
-  last_wave_event: null,
-  last_wave_at: null,
-  state: 'IDLE',
-  error: null,
-  fps_estimate: 0,
-  wave_debug: {},
 }
 
 function getRecognitionConstructor(): BrowserSpeechRecognitionConstructor | null {
@@ -125,169 +104,93 @@ function extractTranscript(event: BrowserSpeechRecognitionEvent): string {
   return transcript.trim()
 }
 
-function isEnglishText(text: string): boolean {
-  const asciiLetters = [...text].filter((char) => /[a-z]/i.test(char)).length
-  const cjkChars = [...text].filter((char) => char >= '\u4e00' && char <= '\u9fff').length
-  return asciiLetters > cjkChars
-}
-
-function languageFromText(text: string, fallback: VoiceLanguage): VoiceLanguage {
-  return isEnglishText(text) ? 'en-US' : fallback
-}
-
-function responseLanguageFromVoiceLanguage(language: VoiceLanguage): ResponseLanguage {
-  return language === 'zh-CN' ? 'zh' : 'en'
-}
-
-function wantsChinese(text: string): boolean {
-  const normalized = text.toLowerCase().replace(/\s+/g, '')
-  return ['中文', '普通话', 'chinese', 'mandarin', 'zhongwen'].some((keyword) => normalized.includes(keyword))
-}
-
-function isGreetingText(text: string): boolean {
-  const normalized = text.toLowerCase().replace(/\s+/g, '')
-  return ['你好', '您好', '嗨', 'hi', 'hello', 'hey', 'goodmorning', 'goodafternoon', 'goodevening'].some(
-    (keyword) => normalized.includes(keyword),
-  )
-}
-
-function formatPercent(value: number): string {
-  return `${(value * 100).toFixed(1)}%`
-}
-
-function stateLabel(state: SessionState): string {
-  const labels: Record<SessionState, string> = {
-    IDLE: '待机',
-    PERSON_DETECTED_FAR: '检测到顾客，但距离较远',
-    PERSON_CLOSE_WAITING_GREETING: '顾客已靠近，等待问候',
-    GREETING_RECEIVED: '已收到近距离问候',
-    INTRODUCING_PRODUCTS: '等待语言选择 / 正在介绍',
-    CONVERSATION_ACTIVE: '自由对话中',
-    SESSION_END: '会话结束',
+function createMessage(role: ChatMessage['role'], text: string): ChatMessage {
+  return {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    role,
+    text,
   }
-  return labels[state] ?? state
 }
 
 function yesNo(value: boolean): string {
-  return value ? '是' : '否'
+  return value ? '支持' : '需确认'
 }
 
-function nextPromptIndex(current: number): number {
-  return (current + 1) % DEMO_PROMPTS.length
-}
-
-function welcomeForLanguage(language: VoiceLanguage): string {
-  return language === 'zh-CN' ? WELCOME_ZH : WELCOME_EN
+function buildSummary(profile: CustomerProfile, recommendedProducts: FlooringProduct[]): string {
+  const parts = [
+    `铺装空间：${profile.room_type ?? '尚未确认'}`,
+    `偏好风格：${profile.style ?? '尚未确认'}`,
+    `预算区间：${profile.budget ?? '尚未确认'}`,
+    `特殊需求：${profile.special_needs.length ? profile.special_needs.join('、') : '暂无明确要求'}`,
+    `重点关注：${profile.concerns.length ? profile.concerns.join('、') : '尚未确认'}`,
+    `推荐产品：${recommendedProducts.length ? recommendedProducts.map((product) => product.name).join('、') : '需要继续了解需求后推荐'}`,
+  ]
+  return parts.join('；') + '。'
 }
 
 function App() {
-  const [visionStatus, setVisionStatus] = useState<VisionStatus>(INITIAL_VISION_STATUS)
+  const [screenMode, setScreenMode] = useState<ScreenMode>('welcome')
   const [products, setProducts] = useState<FlooringProduct[]>([])
   const [recommendedProducts, setRecommendedProducts] = useState<FlooringProduct[]>([])
   const [profile, setProfile] = useState<CustomerProfile>(INITIAL_PROFILE)
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'm-welcome',
-      role: 'agent',
-      text: 'Please move close to the screen and say hello or wave. I will ask you to choose Chinese or English before the product conversation starts.',
-    },
-  ])
-  const [promptIndex, setPromptIndex] = useState(0)
-  const [inputText, setInputText] = useState(DEMO_PROMPTS[0])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [inputText, setInputText] = useState('')
+  const [compareOpen, setCompareOpen] = useState(false)
   const [compareIds, setCompareIds] = useState<string[]>([])
   const [compareRows, setCompareRows] = useState<CompareRow[]>([])
-  const [streamSrc, setStreamSrc] = useState(streamUrl())
+  const [summaryText, setSummaryText] = useState('')
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [voiceLanguage, setVoiceLanguage] = useState<VoiceLanguage>('en-US')
-  const [languageSelectionPending, setLanguageSelectionPending] = useState(false)
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('idle')
-  const [voiceError, setVoiceError] = useState<string | null>(null)
   const [lastTranscript, setLastTranscript] = useState('')
-  const [ttsEnabled, setTtsEnabled] = useState(true)
-  const [ttsProvider, setTtsProvider] = useState<TTSProvider>('auto')
-  const [openaiTTSConfigured, setOpenaiTTSConfigured] = useState<boolean | null>(null)
-  const [localTTSAvailable, setLocalTTSAvailable] = useState<boolean | null>(null)
-  const handledGreetingRef = useRef<number | null>(null)
+
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioUrlRef = useRef<string | null>(null)
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
 
   const speechRecognitionSupported = useMemo(() => getRecognitionConstructor() !== null, [])
-  const speechSynthesisSupported = useMemo(() => 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window, [])
-  const recommendedIds = useMemo(() => new Set(recommendedProducts.map((product) => product.id)), [recommendedProducts])
+  const speechSynthesisSupported = useMemo(
+    () => 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window,
+    [],
+  )
+  const recommendedIds = useMemo(
+    () => new Set(recommendedProducts.map((product) => product.id)),
+    [recommendedProducts],
+  )
 
   useEffect(() => {
-    void refreshCatalogAndSession()
-    void refreshTTSStatus()
+    void loadInitialData()
+    // The camera remains available to the backend for future customer recognition,
+    // but no camera image or engineering telemetry is exposed in the customer UI.
+    void startVision().catch((visionError: unknown) => {
+      console.warn('Background vision service is unavailable:', visionError)
+    })
   }, [])
 
   useEffect(() => {
-    let alive = true
-    const poll = async () => {
-      try {
-        const status = await getVisionStatus()
-        if (alive) {
-          setVisionStatus(status)
-          setError(null)
-        }
-      } catch (err) {
-        if (alive) setError(err instanceof Error ? err.message : String(err))
-      }
-    }
-    void poll()
-    const timer = window.setInterval(poll, 700)
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [messages, voiceStatus])
+
+  useEffect(() => {
     return () => {
-      alive = false
-      window.clearInterval(timer)
+      recognitionRef.current?.abort()
+      audioRef.current?.pause()
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
+      if (speechSynthesisSupported) window.speechSynthesis.cancel()
     }
-  }, [])
+  }, [speechSynthesisSupported])
 
-  useEffect(() => {
-    const lastWaveAt = visionStatus.last_wave_at
-    if (visionStatus.state !== 'GREETING_RECEIVED' || lastWaveAt === null) return
-    if (!visionStatus.stable_close || visionStatus.distance !== 'CLOSE') return
-    if (handledGreetingRef.current === lastWaveAt) return
-    handledGreetingRef.current = lastWaveAt
-    void beginLanguageSelection(`视觉检测到近距离挥手问候：${visionStatus.last_wave_event ?? 'WAVE'}`)
-  }, [visionStatus.distance, visionStatus.last_wave_at, visionStatus.last_wave_event, visionStatus.stable_close, visionStatus.state])
-
-  async function refreshTTSStatus() {
+  async function loadInitialData() {
     try {
-      const status = await getTTSStatus()
-      setOpenaiTTSConfigured(status.openai_tts_configured)
-      setLocalTTSAvailable(Boolean(status.local_tts_available))
-    } catch {
-      setOpenaiTTSConfigured(false)
-      setLocalTTSAvailable(false)
-    }
-  }
-
-  async function refreshCatalogAndSession() {
-    await runAction('refresh', async () => {
       const [catalog, session] = await Promise.all([getProducts(), getSessionStatus()])
       setProducts(catalog.products)
       setProfile(session.customer_profile)
-      const ids = new Set(session.customer_profile.recommended_product_ids)
-      setRecommendedProducts(catalog.products.filter((product) => ids.has(product.id)))
-    })
-  }
-
-  function appendMessage(role: ChatMessage['role'], text: string) {
-    setMessages((current) => [...current, { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, role, text }])
-  }
-
-  function advanceSuggestedPrompt() {
-    setPromptIndex((current) => {
-      const next = nextPromptIndex(current)
-      setInputText(DEMO_PROMPTS[next])
-      return next
-    })
-  }
-
-  function selectSuggestedPrompt(prompt: string, index: number) {
-    setPromptIndex(index)
-    setInputText(prompt)
+      const savedIds = new Set(session.customer_profile.recommended_product_ids)
+      setRecommendedProducts(catalog.products.filter((product) => savedIds.has(product.id)))
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : String(loadError))
+    }
   }
 
   async function runAction(label: string, action: () => Promise<void>) {
@@ -295,11 +198,15 @@ function App() {
     setError(null)
     try {
       await action()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : String(actionError))
     } finally {
       setBusyAction(null)
     }
+  }
+
+  function appendMessage(role: ChatMessage['role'], text: string) {
+    setMessages((current) => [...current, createMessage(role, text)])
   }
 
   function stopSpeaking() {
@@ -313,28 +220,20 @@ function App() {
     setVoiceStatus('idle')
   }
 
-  async function speakWithBrowser(text: string, language: VoiceLanguage): Promise<void> {
-    if (!speechSynthesisSupported) {
-      setVoiceError('This browser does not support SpeechSynthesis TTS.')
-      setVoiceStatus('error')
-      return
-    }
+  async function speakWithBrowser(text: string): Promise<void> {
+    if (!speechSynthesisSupported) return
     window.speechSynthesis.cancel()
     const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = language
-    utterance.rate = language === 'en-US' ? 0.95 : 1.0
-    utterance.pitch = 1.0
+    utterance.lang = 'zh-CN'
+    utterance.rate = 1
+    utterance.pitch = 1
     await new Promise<void>((resolve) => {
-      utterance.onstart = () => {
-        setVoiceStatus('speaking')
-        setVoiceError(null)
-      }
+      utterance.onstart = () => setVoiceStatus('speaking')
       utterance.onend = () => {
         setVoiceStatus('idle')
         resolve()
       }
-      utterance.onerror = (event) => {
-        setVoiceError(`Browser TTS error: ${event.error}`)
+      utterance.onerror = () => {
         setVoiceStatus('error')
         resolve()
       }
@@ -342,104 +241,97 @@ function App() {
     })
   }
 
-  async function speakWithBackendTTS(text: string, language: VoiceLanguage): Promise<void> {
-    const responseLanguage = responseLanguageFromVoiceLanguage(language)
-    setVoiceStatus('speaking')
-    setVoiceError(null)
-    const audioBlob = await synthesizeSpeech(text, responseLanguage, ttsProvider)
-    const url = URL.createObjectURL(audioBlob)
-    audioUrlRef.current = url
-    const audio = new Audio(url)
-    audioRef.current = audio
-    await new Promise<void>((resolve, reject) => {
-      audio.onended = () => resolve()
-      audio.onerror = () => reject(new Error('Backend TTS audio playback failed.'))
-      audio.play().catch(reject)
-    })
-    URL.revokeObjectURL(url)
-    audioUrlRef.current = null
-    audioRef.current = null
-    setVoiceStatus('idle')
-  }
-
-  async function speakText(text: string, languageOverride?: VoiceLanguage): Promise<void> {
-    if (!ttsEnabled || !text.trim()) return
-    const language = languageOverride ?? languageFromText(text, voiceLanguage)
+  async function speakText(text: string): Promise<void> {
+    if (!text.trim()) return
     stopSpeaking()
-
-    if (ttsProvider !== 'browser') {
-      try {
-        await speakWithBackendTTS(text, language)
-        void refreshTTSStatus()
-        return
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        setVoiceError(`Backend TTS unavailable; using browser fallback. ${message}`)
-        if (ttsProvider === 'openai' || ttsProvider === 'local') {
-          setVoiceStatus('error')
-          return
-        }
-      }
+    setVoiceStatus('speaking')
+    try {
+      const audioBlob = await synthesizeSpeech(text, 'zh', 'auto')
+      const audioUrl = URL.createObjectURL(audioBlob)
+      audioUrlRef.current = audioUrl
+      const audio = new Audio(audioUrl)
+      audioRef.current = audio
+      await new Promise<void>((resolve, reject) => {
+        audio.onended = () => resolve()
+        audio.onerror = () => reject(new Error('语音播放失败'))
+        audio.play().catch(reject)
+      })
+      URL.revokeObjectURL(audioUrl)
+      audioUrlRef.current = null
+      audioRef.current = null
+      setVoiceStatus('idle')
+    } catch (ttsError) {
+      console.warn('Backend TTS unavailable, using browser speech synthesis:', ttsError)
+      await speakWithBrowser(text)
     }
-    await speakWithBrowser(text, language)
   }
 
-  function stopListening() {
-    recognitionRef.current?.stop()
-    recognitionRef.current = null
-    setVoiceStatus('idle')
+  async function handleStartConsultation() {
+    await runAction('start', async () => {
+      recognitionRef.current?.abort()
+      stopSpeaking()
+      const session = await resetSession()
+      setProfile(session.customer_profile)
+      setRecommendedProducts([])
+      setCompareIds([])
+      setCompareRows([])
+      setInputText('')
+      setLastTranscript('')
+      setSummaryText('')
+      setMessages([createMessage('agent', INTRODUCTION)])
+      setScreenMode('conversation')
+      await sendDemoEvent('intro_started').catch(() => undefined)
+      await sendDemoEvent('intro_finished').catch(() => undefined)
+      await speakText(INTRODUCTION)
+    })
   }
 
-  async function beginLanguageSelection(source: string) {
-    setLanguageSelectionPending(true)
-    setVoiceLanguage('en-US')
-    appendMessage('system', source)
-    appendMessage('agent', LANGUAGE_PROMPT_EN)
-    await sendDemoEvent('intro_started').catch(() => undefined)
-    void speakText(LANGUAGE_PROMPT_EN, 'en-US')
+  async function handleUserMessage(rawText: string) {
+    const text = rawText.trim()
+    if (!text) return
+    appendMessage('customer', text)
+    setInputText('')
+    setVoiceStatus('processing')
+    try {
+      const response = await sendChat(text, 'zh')
+      appendMessage('agent', response.answer)
+      setRecommendedProducts(response.recommended_products)
+      setProfile(response.customer_profile)
+      await speakText(response.answer)
+    } catch (chatError) {
+      setVoiceStatus('error')
+      throw chatError
+    }
   }
 
-  async function completeLanguageSelection(rawText: string) {
-    const selectedLanguage: VoiceLanguage = wantsChinese(rawText) ? 'zh-CN' : 'en-US'
-    const selectedMessage =
-      selectedLanguage === 'zh-CN'
-        ? 'Language selected: Chinese. 后续将使用中文对话。'
-        : 'Language selected: English. I will continue in English.'
-    const welcomeText = welcomeForLanguage(selectedLanguage)
-    setVoiceLanguage(selectedLanguage)
-    setLanguageSelectionPending(false)
-    appendMessage('customer', rawText || '(default English)')
-    appendMessage('system', selectedMessage)
-    appendMessage('agent', welcomeText)
-    await sendDemoEvent('intro_finished')
-    const session = await getSessionStatus()
-    const status = await getVisionStatus()
-    setProfile(session.customer_profile)
-    setVisionStatus(status)
-    await speakText(welcomeText, selectedLanguage)
+  async function handleTextSubmit() {
+    const text = inputText.trim()
+    if (!text || busyAction !== null) return
+    await runAction('chat', async () => handleUserMessage(text))
   }
 
   async function startListening() {
     const Recognition = getRecognitionConstructor()
     if (!Recognition) {
-      setVoiceError('This browser does not support Web Speech Recognition. Please use Chrome or Edge, or use text input.')
-      setVoiceStatus('error')
+      setError('当前浏览器不支持语音识别，请使用 Chrome 或 Edge，也可以直接输入文字。')
       return
     }
+
     stopSpeaking()
     recognitionRef.current?.abort()
     const recognition = new Recognition()
     recognitionRef.current = recognition
-    recognition.lang = languageSelectionPending ? 'en-US' : voiceLanguage
+    recognition.lang = 'zh-CN'
     recognition.continuous = false
     recognition.interimResults = false
     recognition.maxAlternatives = 1
     recognition.onstart = () => {
       setVoiceStatus('listening')
-      setVoiceError(null)
+      setError(null)
     }
     recognition.onerror = (event) => {
-      setVoiceError(`STT error: ${event.error}${event.message ? ` - ${event.message}` : ''}`)
+      console.warn('Speech recognition error:', event.error, event.message)
+      setError('没有听清，请再说一次，或者使用文字输入。')
       setVoiceStatus('error')
       recognitionRef.current = null
     }
@@ -455,155 +347,27 @@ function App() {
         return
       }
       setVoiceStatus('processing')
-      void handleRecognizedSpeech(transcript).catch((err) => {
-        setVoiceError(err instanceof Error ? err.message : String(err))
-        setVoiceStatus('error')
-      })
+      void runAction('chat', async () => handleUserMessage(transcript))
     }
+
     try {
       recognition.start()
-    } catch (err) {
-      setVoiceError(err instanceof Error ? err.message : String(err))
+    } catch (recognitionError) {
       setVoiceStatus('error')
+      setError(recognitionError instanceof Error ? recognitionError.message : String(recognitionError))
     }
   }
 
-  async function handleRecognizedSpeech(transcript: string) {
-    const trimmed = transcript.trim()
-    if (!trimmed) return
-    if (languageSelectionPending) {
-      await completeLanguageSelection(trimmed)
-      return
-    }
-
-    const isGreeting = isGreetingText(trimmed)
-    const closeReady =
-      visionStatus.state === 'PERSON_CLOSE_WAITING_GREETING' && visionStatus.distance === 'CLOSE' && visionStatus.stable_close
-
-    if (isGreeting && visionStatus.state !== 'CONVERSATION_ACTIVE') {
-      appendMessage('customer', trimmed)
-      if (!closeReady) {
-        const message =
-          voiceLanguage === 'zh-CN'
-            ? '请先靠近屏幕，再说你好或挥手。这样可以避免远距离误触发。'
-            : 'Please move closer to the screen first, then say hello or wave. This prevents accidental activation from a distance.'
-        appendMessage('system', message)
-        await speakText(message, voiceLanguage)
-        return
-      }
-      const result = await sendVoiceGreeting(trimmed)
-      if (result.accepted) await beginLanguageSelection('Voice greeting detected. Please choose the conversation language.')
-      else {
-        appendMessage('agent', result.message)
-        await speakText(result.message, languageFromText(result.message, voiceLanguage))
-      }
-      return
-    }
-
-    appendMessage('customer', trimmed)
-    const response = await sendChat(trimmed, responseLanguageFromVoiceLanguage(voiceLanguage))
-    appendMessage('agent', response.answer)
-    setRecommendedProducts(response.recommended_products)
-    setProfile(response.customer_profile)
-    advanceSuggestedPrompt()
-    await speakText(response.answer, voiceLanguage)
-  }
-
-  async function handleStartVision() {
-    await runAction('startVision', async () => {
-      await startVision()
-      setStreamSrc(streamUrl())
-      const status = await getVisionStatus()
-      setVisionStatus(status)
-      appendMessage('system', 'Vision service started. Please move close and wave. Only close-range greeting opens the conversation.')
-    })
-  }
-
-  async function handleStopVision() {
-    await runAction('stopVision', async () => {
-      await stopVision()
-      const status = await getVisionStatus()
-      setVisionStatus(status)
-      appendMessage('system', '视觉服务已停止。Vision service stopped.')
-    })
-  }
-
-  async function handleResetSession() {
-    await runAction('resetSession', async () => {
-      await stopVision().catch(() => undefined)
-      stopSpeaking()
-      recognitionRef.current?.abort()
-      const session = await resetSession()
-      handledGreetingRef.current = null
-      setVisionStatus(INITIAL_VISION_STATUS)
-      setProfile(session.customer_profile)
-      setRecommendedProducts([])
-      setCompareIds([])
-      setCompareRows([])
-      setPromptIndex(0)
-      setInputText(DEMO_PROMPTS[0])
-      setVoiceLanguage('en-US')
-      setLanguageSelectionPending(false)
-      setLastTranscript('')
-      setVoiceError(null)
-      setVoiceStatus('idle')
-      setMessages([
-        {
-          id: 'm-reset',
-          role: 'agent',
-          text: 'Session reset. Please move close to the screen and say hello or wave. I will ask you to choose Chinese or English.',
-        },
-      ])
-      setStreamSrc(streamUrl())
-      void refreshTTSStatus()
-    })
-  }
-
-  async function handleDemoEvent(event: string, label: string) {
-    await runAction(`demo-${event}`, async () => {
-      const response = await sendDemoEvent(event)
-      setProfile(response.customer_profile)
-      const status = await getVisionStatus()
-      setVisionStatus(status)
-      if (event === 'wave' || event === 'greeting') await beginLanguageSelection(label)
-      else appendMessage('system', label)
-    })
-  }
-
-  async function handleVoiceHi() {
-    await runAction('voiceHi', async () => {
-      const result = await sendVoiceGreeting('hello')
-      appendMessage('customer', 'hello')
-      if (result.accepted) await beginLanguageSelection('Simulated voice greeting detected.')
-      else appendMessage('agent', result.message)
-      const session = await getSessionStatus()
-      const status = await getVisionStatus()
-      setProfile(session.customer_profile)
-      setVisionStatus(status)
-    })
-  }
-
-  async function handleChatSubmit() {
-    const text = inputText.trim()
-    if (!text) return
-    await runAction('chat', async () => {
-      if (languageSelectionPending) {
-        await completeLanguageSelection(text)
-        advanceSuggestedPrompt()
-        return
-      }
-      appendMessage('customer', text)
-      const response = await sendChat(text, responseLanguageFromVoiceLanguage(voiceLanguage))
-      appendMessage('agent', response.answer)
-      setRecommendedProducts(response.recommended_products)
-      setProfile(response.customer_profile)
-      advanceSuggestedPrompt()
-      await speakText(response.answer, voiceLanguage)
-    })
+  function stopListening() {
+    recognitionRef.current?.stop()
+    recognitionRef.current = null
+    setVoiceStatus('idle')
   }
 
   async function handleCompareToggle(productId: string) {
-    const nextIds = compareIds.includes(productId) ? compareIds.filter((id) => id !== productId) : [...compareIds, productId].slice(-2)
+    const nextIds = compareIds.includes(productId)
+      ? compareIds.filter((id) => id !== productId)
+      : [...compareIds, productId].slice(-2)
     setCompareIds(nextIds)
     if (nextIds.length === 2) {
       await runAction('compare', async () => {
@@ -615,251 +379,379 @@ function App() {
     }
   }
 
+  async function handleFinishAndSummarize() {
+    await runAction('summary', async () => {
+      stopListening()
+      const summary = buildSummary(profile, recommendedProducts)
+      setSummaryText(summary)
+      setScreenMode('summary')
+      await sendDemoEvent('end').catch(() => undefined)
+      await speakText(`好的，我为您总结一下本次咨询。${summary}`)
+    })
+  }
+
+  async function handleRestart() {
+    await runAction('restart', async () => {
+      recognitionRef.current?.abort()
+      stopSpeaking()
+      const session = await resetSession()
+      setProfile(session.customer_profile)
+      setRecommendedProducts([])
+      setMessages([])
+      setInputText('')
+      setCompareIds([])
+      setCompareRows([])
+      setSummaryText('')
+      setLastTranscript('')
+      setCompareOpen(false)
+      setScreenMode('welcome')
+    })
+  }
+
+  const avatarStatus = voiceStatus === 'error' ? 'idle' : voiceStatus
+
   return (
     <main className="app-shell">
-      <header className="hero-header">
-        <div>
-          <p className="eyebrow">Emergency Wood Floor Greeter Demo</p>
-          <h1>木地板 AI 导购体验区</h1>
-          <p className="subtitle">靠近屏幕并打招呼后，系统先询问中文或英文；默认使用英文。</p>
+      {error && (
+        <div className="friendly-alert" role="status">
+          <span>{error}</span>
+          <button type="button" onClick={() => setError(null)} aria-label="关闭提示">
+            <X size={18} />
+          </button>
         </div>
-        <div className="server-card">
-          <span>Backend</span>
-          <strong>{API_BASE_URL}</strong>
-        </div>
-      </header>
+      )}
 
-      {error && <div className="error-banner">{error}</div>}
-      {voiceError && <div className="error-banner">{voiceError}</div>}
-
-      <section className="dashboard-grid">
-        <section className="panel camera-panel">
-          <div className="panel-title-row">
-            <div>
-              <h2>摄像头与视觉检测</h2>
-              <p>Backend OpenCV + MediaPipe 独占摄像头；只有 CLOSE + stable=True 的挥手会触发问候。</p>
-            </div>
-            <span className={`status-dot ${visionStatus.running ? 'on' : 'off'}`}>{visionStatus.running ? 'RUNNING' : 'STOPPED'}</span>
+      {screenMode === 'welcome' && (
+        <section className="welcome-screen">
+          <div className="brand-mark">
+            <Sparkles size={20} />
+            <span>木地板 AI 选购顾问</span>
           </div>
-          <div className="camera-frame">
-            <img src={streamSrc} alt="Vision stream" />
+          <ConsultantAvatar status="idle" large />
+          <div className="welcome-copy">
+            <p className="welcome-kicker">您好，我是小木</p>
+            <h1>帮您更轻松地选到合适的木地板</h1>
+            <p>告诉我您的房间、风格、预算和生活需求，我会为您推荐、比较并整理选购要点。</p>
           </div>
-          <div className="status-grid">
-            <Metric label="State" value={stateLabel(visionStatus.state)} highlight />
-            <Metric label="Person" value={visionStatus.person_detected ? 'YES' : 'NO'} />
-            <Metric label="Distance" value={visionStatus.distance} />
-            <Metric label="Stable Close" value={visionStatus.stable_close ? 'TRUE' : 'FALSE'} />
-            <Metric label="Face Height" value={formatPercent(visionStatus.face_height_ratio)} />
-            <Metric label="Face Area" value={formatPercent(visionStatus.face_area_ratio)} />
-            <Metric label="Accepted Wave" value={visionStatus.wave_detected ? 'YES' : 'NO'} />
-            <Metric label="Raw Wave" value={visionStatus.raw_wave_event ?? 'NONE'} />
-            <Metric label="Ignored" value={visionStatus.raw_wave_ignored_reason ?? 'NONE'} />
-            <Metric label="FPS" value={visionStatus.fps_estimate.toFixed(1)} />
-          </div>
+          <button
+            type="button"
+            className="primary-cta"
+            onClick={() => void handleStartConsultation()}
+            disabled={busyAction !== null}
+          >
+            <Sparkles size={22} />
+            {busyAction === 'start' ? '正在为您准备…' : '开始咨询'}
+          </button>
+          <p className="privacy-note">点击后开始本次咨询。摄像头画面不会显示在屏幕上。</p>
         </section>
+      )}
 
-        <section className="panel chat-panel">
-          <div className="panel-title-row">
-            <div>
-              <h2>AI 导购对话</h2>
-              <p>打招呼后先选择语言。说 Chinese / 中文 使用中文，否则默认 English。</p>
-            </div>
-            <span className="status-dot neutral">{languageSelectionPending ? 'WAITING LANGUAGE' : `VOICE: ${voiceStatus.toUpperCase()}`}</span>
-          </div>
-          <div className="chat-log">
-            {messages.map((message) => (
-              <div key={message.id} className={`message ${message.role}`}>
-                <span>{message.role === 'agent' ? 'AI 导购' : message.role === 'customer' ? '顾客' : '系统'}</span>
-                <p>{message.text}</p>
+      {screenMode === 'conversation' && (
+        <section className="consultation-screen">
+          <header className="customer-header">
+            <div className="brand-title">
+              <span className="mini-logo"><Sparkles size={17} /></span>
+              <div>
+                <strong>小木 AI 导购</strong>
+                <span>{voiceStatusLabel(voiceStatus)}</span>
               </div>
-            ))}
-          </div>
-
-          <div className={`voice-controls ${languageSelectionPending ? 'language-pending' : ''}`}>
-            <div className="voice-config-row">
-              <label>
-                STT Language / 语音识别语言
-                <select value={voiceLanguage} onChange={(event) => setVoiceLanguage(event.target.value as VoiceLanguage)}>
-                  <option value="en-US">English en-US / default</option>
-                  <option value="zh-CN">中文普通话 zh-CN</option>
-                </select>
-              </label>
-              <label>
-                TTS Provider
-                <select value={ttsProvider} onChange={(event) => setTtsProvider(event.target.value as TTSProvider)}>
-                  <option value="auto">Local Kokoro → OpenAI → Browser</option>
-                  <option value="local">Local Kokoro only</option>
-                  <option value="openai">OpenAI only</option>
-                  <option value="browser">Browser only</option>
-                </select>
-              </label>
-              <label className="checkbox-label">
-                <input type="checkbox" checked={ttsEnabled} onChange={(event) => setTtsEnabled(event.target.checked)} />
-                TTS 播报
-              </label>
             </div>
-            {languageSelectionPending && (
-              <div className="language-choice-row">
-                <button type="button" onClick={() => void completeLanguageSelection('English')}>Use English / 默认英文</button>
-                <button type="button" onClick={() => void completeLanguageSelection('中文')}>使用中文 / Chinese</button>
+            <button type="button" className="quiet-button" onClick={() => void handleRestart()} disabled={busyAction !== null}>
+              <RotateCcw size={17} />
+              重新开始
+            </button>
+          </header>
+
+          <div className="consultation-layout">
+            <aside className="assistant-stage">
+              <ConsultantAvatar status={avatarStatus} />
+              <div className="assistant-status">
+                <span className={`status-pulse ${avatarStatus}`} />
+                <strong>{voiceStatusLabel(voiceStatus)}</strong>
+                <p>{lastTranscript ? `刚刚听到：“${lastTranscript}”` : '您可以直接说出需求，也可以输入文字。'}</p>
               </div>
-            )}
-            <div className="voice-button-row">
-              <button type="button" onClick={() => void startListening()} disabled={!speechRecognitionSupported || voiceStatus === 'listening'}>
-                Start Listening
-              </button>
-              <button type="button" className="secondary-button compact" onClick={stopListening} disabled={voiceStatus !== 'listening'}>
-                Stop Listening
-              </button>
-              <button type="button" className="secondary-button compact" onClick={() => void speakText(languageSelectionPending ? LANGUAGE_PROMPT_EN : 'Voice is ready.', 'en-US')}>
-                Test TTS
-              </button>
-              <button type="button" className="secondary-button compact" onClick={stopSpeaking}>Stop TTS</button>
-            </div>
-            <div className="voice-status-line">
-              <span>STT: {speechRecognitionSupported ? 'supported' : 'not supported'}</span>
-              <span>Browser TTS: {speechSynthesisSupported ? 'supported' : 'not supported'}</span>
-              <span>Local Kokoro: {localTTSAvailable === null ? 'checking' : localTTSAvailable ? 'available' : 'not running'}</span>
-              <span>OpenAI TTS: {openaiTTSConfigured === null ? 'checking' : openaiTTSConfigured ? 'configured' : 'not configured'}</span>
-              <span>Conversation: {voiceLanguage === 'zh-CN' ? 'Chinese' : 'English default'}</span>
-              <span>Heard: {lastTranscript || 'None'}</span>
-            </div>
-          </div>
+              <div className="quick-start-list">
+                {QUICK_PROMPTS.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    onClick={() => setInputText(prompt)}
+                    disabled={busyAction !== null}
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </aside>
 
-          <div className="quick-prompts">
-            {DEMO_PROMPTS.map((prompt, index) => (
-              <button key={prompt} type="button" className={`prompt-chip ${index === promptIndex ? 'active' : ''}`} onClick={() => selectSuggestedPrompt(prompt, index)} disabled={busyAction !== null}>
-                {prompt}
-              </button>
-            ))}
-          </div>
-          <div className="chat-input-row">
-            <textarea value={inputText} onChange={(event) => setInputText(event.target.value)} placeholder="During language selection, type Chinese / 中文 for Chinese; otherwise English is used." />
-            <button type="button" onClick={handleChatSubmit} disabled={busyAction !== null}>发送 / Send</button>
-          </div>
-        </section>
-      </section>
+            <section className="conversation-card">
+              <div className="chat-log" aria-live="polite">
+                {messages.map((message) => (
+                  <div key={message.id} className={`message-row ${message.role}`}>
+                    <div className="message-bubble">
+                      <span>{message.role === 'agent' ? '小木' : '我'}</span>
+                      <p>{message.text}</p>
+                    </div>
+                  </div>
+                ))}
+                {voiceStatus === 'processing' && (
+                  <div className="message-row agent">
+                    <div className="message-bubble thinking-bubble">
+                      <span>小木</span>
+                      <p>正在为您整理合适的建议<span className="typing-dots">•••</span></p>
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
 
-      <section className="panel controls-panel">
-        <div className="panel-title-row">
-          <div>
-            <h2>Demo Controls</h2>
-            <p>现场演示时用于兜底：即使摄像头或语音不稳定，也能完成完整流程。</p>
-          </div>
-          {busyAction && <span className="status-dot neutral">BUSY: {busyAction}</span>}
-        </div>
-        <div className="button-grid">
-          <button type="button" onClick={handleStartVision} disabled={busyAction !== null}>Start Vision</button>
-          <button type="button" onClick={handleStopVision} disabled={busyAction !== null}>Stop Vision</button>
-          <button type="button" onClick={() => void handleDemoEvent('person_close', '模拟顾客已靠近。')} disabled={busyAction !== null}>Simulate Close</button>
-          <button type="button" onClick={() => void handleDemoEvent('wave', 'Simulated close-range wave greeting detected.')} disabled={busyAction !== null}>Simulate Wave</button>
-          <button type="button" onClick={handleVoiceHi} disabled={busyAction !== null}>Simulate Voice Hi</button>
-          <button type="button" onClick={handleResetSession} disabled={busyAction !== null}>Reset Session</button>
-        </div>
-      </section>
-
-      <section className="lower-grid">
-        <section className="panel products-panel">
-          <div className="panel-title-row">
-            <div>
-              <h2>模拟产品库与推荐</h2>
-              <p>点击产品可选择两款做对比；AI 推荐会自动高亮。</p>
-            </div>
-            <span className="status-dot neutral">{products.length} SKUs</span>
-          </div>
-          <div className="product-grid">
-            {products.map((product) => (
-              <ProductCard key={product.id} product={product} recommended={recommendedIds.has(product.id)} selected={compareIds.includes(product.id)} onToggleCompare={() => void handleCompareToggle(product.id)} />
-            ))}
-          </div>
-          {compareRows.length > 0 && (
-            <div className="compare-table-wrap">
-              <h3>产品对比</h3>
-              <table>
-                <tbody>
-                  {compareRows.map((row) => (
-                    <tr key={row.field}>
-                      <th>{row.field}</th>
-                      {compareIds.map((id) => <td key={id}>{String(row.values[id] ?? '-')}</td>)}
-                    </tr>
+              {recommendedProducts.length > 0 && (
+                <div className="recommendation-strip">
+                  <div>
+                    <Sparkles size={18} />
+                    <span>为您推荐</span>
+                  </div>
+                  {recommendedProducts.map((product) => (
+                    <button key={product.id} type="button" onClick={() => setCompareOpen(true)}>
+                      {product.name}
+                    </button>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              )}
+
+              <div className="composer">
+                <textarea
+                  value={inputText}
+                  onChange={(event) => setInputText(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault()
+                      void handleTextSubmit()
+                    }
+                  }}
+                  placeholder="例如：客厅用，家里有宠物，希望耐磨好清洁…"
+                  rows={2}
+                />
+                <button
+                  type="button"
+                  className="send-button"
+                  onClick={() => void handleTextSubmit()}
+                  disabled={!inputText.trim() || busyAction !== null}
+                  aria-label="发送"
+                >
+                  <Send size={21} />
+                </button>
+              </div>
+
+              <div className="primary-actions">
+                <button
+                  type="button"
+                  className={`voice-button ${voiceStatus === 'listening' ? 'active' : ''}`}
+                  onClick={() => (voiceStatus === 'listening' ? stopListening() : void startListening())}
+                  disabled={!speechRecognitionSupported || (busyAction !== null && voiceStatus !== 'listening')}
+                >
+                  {voiceStatus === 'listening' ? <Square size={20} /> : <Mic size={22} />}
+                  {voiceStatus === 'listening' ? '结束收音' : '点击说话'}
+                </button>
+                <button type="button" onClick={() => setCompareOpen(true)} disabled={products.length === 0}>
+                  <BarChart3 size={21} />
+                  产品对比
+                </button>
+                <button type="button" onClick={() => void handleFinishAndSummarize()} disabled={busyAction !== null}>
+                  <ClipboardCheck size={21} />
+                  结束并总结
+                </button>
+              </div>
+            </section>
+          </div>
+        </section>
+      )}
+
+      {screenMode === 'summary' && (
+        <section className="summary-screen">
+          <div className="summary-heading">
+            <div className="summary-icon"><ClipboardCheck size={30} /></div>
+            <p>本次咨询已完成</p>
+            <h1>您的选购要点</h1>
+          </div>
+          <div className="summary-grid">
+            <SummaryItem label="铺装空间" value={profile.room_type ?? '尚未确认'} />
+            <SummaryItem label="偏好风格" value={profile.style ?? '尚未确认'} />
+            <SummaryItem label="预算区间" value={profile.budget ?? '尚未确认'} />
+            <SummaryItem label="特殊需求" value={profile.special_needs.length ? profile.special_needs.join('、') : '暂无明确要求'} />
+            <SummaryItem label="重点关注" value={profile.concerns.length ? profile.concerns.join('、') : '尚未确认'} />
+            <SummaryItem
+              label="推荐产品"
+              value={recommendedProducts.length ? recommendedProducts.map((product) => product.name).join('、') : '需要继续了解需求'}
+            />
+          </div>
+          <div className="summary-narrative">
+            <Sparkles size={20} />
+            <p>{summaryText}</p>
+          </div>
+          {profile.follow_up_suggestion && (
+            <div className="follow-up-card">
+              <Check size={20} />
+              <div>
+                <strong>下一步建议</strong>
+                <p>{profile.follow_up_suggestion}</p>
+              </div>
             </div>
           )}
+          <div className="summary-actions">
+            <button type="button" onClick={() => setScreenMode('conversation')}>
+              继续咨询
+            </button>
+            <button type="button" className="primary-cta compact" onClick={() => void handleRestart()} disabled={busyAction !== null}>
+              <RotateCcw size={20} />
+              开始新的咨询
+            </button>
+          </div>
         </section>
+      )}
 
-        <section className="panel profile-panel">
-          <div className="panel-title-row">
-            <div>
-              <h2>客户需求摘要</h2>
-              <p>后端根据对话自动提取需求，模拟销售侧建档。</p>
+      {compareOpen && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setCompareOpen(false)}>
+          <section className="compare-modal" role="dialog" aria-modal="true" aria-label="产品对比" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <div>
+                <p>最多选择两款</p>
+                <h2>产品对比</h2>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setCompareOpen(false)} aria-label="关闭产品对比">
+                <X size={23} />
+              </button>
+            </header>
+
+            <div className="compare-product-grid">
+              {products.map((product) => (
+                <ProductChoiceCard
+                  key={product.id}
+                  product={product}
+                  recommended={recommendedIds.has(product.id)}
+                  selected={compareIds.includes(product.id)}
+                  onToggle={() => void handleCompareToggle(product.id)}
+                />
+              ))}
             </div>
-            <span className="status-dot neutral">{profile.follow_up_status}</span>
-          </div>
-          <div className="profile-list">
-            <InfoRow label="房间" value={profile.room_type ?? '待确认'} />
-            <InfoRow label="风格" value={profile.style ?? '待确认'} />
-            <InfoRow label="预算" value={profile.budget ?? '待确认'} />
-            <InfoRow label="特殊需求" value={profile.special_needs.length ? profile.special_needs.join(' / ') : '待确认'} />
-            <InfoRow label="关注点" value={profile.concerns.length ? profile.concerns.join(' / ') : '待确认'} />
-            <InfoRow label="推荐 SKU" value={profile.recommended_product_ids.length ? profile.recommended_product_ids.join(' / ') : '暂无'} />
-          </div>
-          <div className="summary-card">
-            <h3>Conversation Summary</h3>
-            <p>{profile.conversation_summary || '客户需求尚未明确。'}</p>
-          </div>
-          <div className="summary-card">
-            <h3>Follow-up Suggestion</h3>
-            <p>{profile.follow_up_suggestion || '建议继续确认铺装空间、风格和预算。'}</p>
-          </div>
-        </section>
-      </section>
+
+            {compareIds.length < 2 && <p className="compare-hint">请选择两款产品，即可查看完整参数对比。</p>}
+
+            {compareRows.length > 0 && (
+              <div className="compare-table-wrap">
+                <table>
+                  <tbody>
+                    {compareRows.map((row) => (
+                      <tr key={row.field}>
+                        <th>{row.field}</th>
+                        {compareIds.map((id) => (
+                          <td key={id}>{String(row.values[id] ?? '—')}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
     </main>
   )
 }
 
-function Metric({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
+function voiceStatusLabel(status: VoiceStatus): string {
+  const labels: Record<VoiceStatus, string> = {
+    idle: '随时为您服务',
+    listening: '正在认真听您说',
+    processing: '正在整理建议',
+    speaking: '正在为您讲解',
+    error: '请再试一次',
+  }
+  return labels[status]
+}
+
+function ConsultantAvatar({ status, large = false }: { status: VoiceStatus; large?: boolean }) {
   return (
-    <div className={`metric ${highlight ? 'highlight' : ''}`}>
+    <div className={`consultant-avatar ${status} ${large ? 'large' : ''}`} aria-label="AI 导购小木">
+      <div className="avatar-halo" />
+      <svg viewBox="0 0 260 300" role="img" aria-hidden="true">
+        <defs>
+          <linearGradient id="shirt-gradient" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#b87545" />
+            <stop offset="100%" stopColor="#7d4529" />
+          </linearGradient>
+          <linearGradient id="hair-gradient" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#442a23" />
+            <stop offset="100%" stopColor="#251814" />
+          </linearGradient>
+        </defs>
+        <ellipse cx="130" cy="279" rx="91" ry="17" fill="rgba(56,35,25,.12)" />
+        <path d="M51 282c8-56 38-85 79-85s72 29 80 85" fill="url(#shirt-gradient)" />
+        <path d="M104 199h52v39c-8 13-44 13-52 0z" fill="#e9b999" />
+        <path d="M78 111c0-55 24-85 56-85 42 0 61 34 56 88l-10 59c-8 36-28 54-50 54s-43-18-51-54z" fill="#f2c7a8" />
+        <path d="M74 120C61 61 88 18 137 18c44 0 68 35 57 99-12-6-21-22-24-38-20 22-49 30-87 27-1 8-4 12-9 14z" fill="url(#hair-gradient)" />
+        <path d="M78 113c-14 2-17 17-10 32 4 9 10 14 17 13" fill="#efc2a2" />
+        <path d="M185 113c14 2 17 17 10 32-4 9-10 14-17 13" fill="#efc2a2" />
+        <path d="M103 130c7-5 15-5 22 0" stroke="#5b3c31" strokeWidth="4" strokeLinecap="round" fill="none" />
+        <path d="M142 130c7-5 15-5 22 0" stroke="#5b3c31" strokeWidth="4" strokeLinecap="round" fill="none" />
+        <ellipse cx="114" cy="137" rx="4" ry="5" fill="#34231f" />
+        <ellipse cx="153" cy="137" rx="4" ry="5" fill="#34231f" />
+        <path d="M132 142c-3 10-4 17 3 20" stroke="#d69c7d" strokeWidth="3" strokeLinecap="round" fill="none" />
+        <path className="avatar-mouth" d="M115 177c11 9 25 9 37 0" stroke="#9a4b4c" strokeWidth="4" strokeLinecap="round" fill="none" />
+        <path d="M99 207l31 25 31-25 15 17-18 58H102l-18-58z" fill="#f8f4ef" />
+        <path d="M130 232v50" stroke="#d6c6b7" strokeWidth="3" />
+        <circle cx="130" cy="252" r="4" fill="#9a6544" />
+      </svg>
+      <div className="voice-rings"><span /><span /><span /></div>
+    </div>
+  )
+}
+
+function SummaryItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="summary-item">
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
   )
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+function ProductChoiceCard({
+  product,
+  recommended,
+  selected,
+  onToggle,
+}: {
+  product: FlooringProduct
+  recommended: boolean
+  selected: boolean
+  onToggle: () => void
+}) {
   return (
-    <div className="info-row">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  )
-}
-
-function ProductCard({ product, recommended, selected, onToggleCompare }: { product: FlooringProduct; recommended: boolean; selected: boolean; onToggleCompare: () => void }) {
-  return (
-    <article className={`product-card ${recommended ? 'recommended' : ''} ${selected ? 'selected' : ''}`}>
-      <div className="product-card-header">
-        <div>
-          <span className="sku">{product.id}</span>
-          <h3>{product.name}</h3>
-        </div>
-        {recommended && <span className="badge">推荐</span>}
-      </div>
-      <div className="product-meta">
-        <span>{product.type}</span>
+    <article className={`choice-card ${selected ? 'selected' : ''}`}>
+      <div className="floor-swatch" data-tone={product.color}>
         <span>{product.color}</span>
-        <span>{product.price_range}</span>
-        <span>{product.wear_level}</span>
       </div>
-      <p className="product-points">{product.selling_points.slice(0, 3).join(' / ')}</p>
-      <div className="feature-row">
-        <span>防水：{yesNo(product.waterproof)}</span>
-        <span>地暖：{yesNo(product.floor_heating)}</span>
-        <span>宠物：{yesNo(product.pet_friendly)}</span>
+      <div className="choice-card-body">
+        <div className="choice-card-heading">
+          <div>
+            <span className="sku">{product.id}</span>
+            <h3>{product.name}</h3>
+          </div>
+          {recommended && <span className="recommend-badge">推荐</span>}
+        </div>
+        <p>{product.type} · {product.price_range} · {product.wear_level}</p>
+        <div className="feature-chips">
+          <span>防水 {yesNo(product.waterproof)}</span>
+          <span>地暖 {yesNo(product.floor_heating)}</span>
+          <span>宠物 {yesNo(product.pet_friendly)}</span>
+        </div>
+        <button type="button" className={selected ? 'selected' : ''} onClick={onToggle}>
+          {selected ? <Check size={17} /> : <BarChart3 size={17} />}
+          {selected ? '已加入对比' : '加入对比'}
+        </button>
       </div>
-      <button type="button" className="secondary-button" onClick={onToggleCompare}>{selected ? '取消对比' : '加入对比'}</button>
     </article>
   )
 }
