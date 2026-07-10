@@ -1,0 +1,25 @@
+1. Kokoro
+
+cd F:\emergency-wood-floor-greeter-demo\local_tts
+conda activate kokoro-tts
+powershell -ExecutionPolicy Bypass -File .\smoke_test_kokoro_tts.ps1
+
+
+2. backend
+cd F:\emergency-wood-floor-greeter-demo\backend
+conda activate woodfloor
+
+$env:LOCAL_TTS_URL="http://127.0.0.1:8010/tts"
+$env:LOCAL_TTS_HEALTH_URL="http://127.0.0.1:8010/health"
+
+$env:OPENAI_API_KEY="sk-your-real-key-here"
+$env:OPENAI_TTS_MODEL="gpt-4o-mini-tts"
+$env:OPENAI_TTS_VOICE="marin"
+
+uvicorn app.main:app --reload --port 8000
+
+
+
+3. frontend
+cd F:\emergency-wood-floor-greeter-demo\ui
+npm run dev -- --host 127.0.0.1
