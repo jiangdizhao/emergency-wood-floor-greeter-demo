@@ -5,7 +5,7 @@ import os
 import threading
 import time
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 import soundfile as sf
@@ -25,10 +25,8 @@ class KokoroRuntime:
     load_error: str | None = None
     warmup_started_at: float | None = None
     warmup_completed_at: float | None = None
-    warmup_error: str | None = None
-    warmup_voice: str | None = None
-    warmup_cache_key: tuple[str, str, float, str] | None = None
-    warmup_audio: bytes | None = None
+    warmup_cache: dict[tuple[str, str, float, str], bytes] = field(default_factory=dict)
+    warmup_errors: dict[str, str] = field(default_factory=dict)
 
 
 class LocalTTSRequest(BaseModel):
@@ -41,7 +39,6 @@ class LocalTTSRequest(BaseModel):
 runtime = KokoroRuntime(lock=threading.RLock(), inference_lock=threading.Lock())
 
 DEFAULT_EN_VOICE = os.getenv("KOKORO_EN_VOICE", "af_heart")
-# The customer-facing avatar is male, so use a Mandarin male voice by default.
 DEFAULT_ZH_VOICE = os.getenv("KOKORO_ZH_VOICE", "zm_yunxi")
 SAMPLE_RATE = int(os.getenv("KOKORO_SAMPLE_RATE", "24000"))
 WARMUP_ON_START = os.getenv("KOKORO_WARMUP_ON_START", "true").strip().lower() not in {
@@ -53,6 +50,21 @@ WARMUP_ON_START = os.getenv("KOKORO_WARMUP_ON_START", "true").strip().lower() no
 WARMUP_TEXT_ZH = os.getenv(
     "KOKORO_WARMUP_TEXT_ZH",
     "您好，欢迎来到木地板体验区。我是您的 AI 选购顾问小木。我可以根据房间、装修风格、预算，以及地暖、宠物和日常清洁需求，为您推荐合适的地板。请问您这次主要想为哪个空间选择地板呢？",
+)
+WARMUP_ZH_VOICES = tuple(
+    dict.fromkeys(
+        [
+            DEFAULT_ZH_VOICE,
+            *[
+                voice.strip()
+                for voice in os.getenv(
+                    "KOKORO_WARMUP_ZH_VOICES",
+                    "zm_yunxi,zm_yunjian,zm_yunxia,zm_yunyang",
+                ).split(",")
+                if voice.strip()
+            ],
+        ]
+    )
 )
 
 
@@ -85,7 +97,7 @@ def _synthesize_wav(
     speed: float,
 ) -> bytes:
     # Kokoro pipelines are shared by FastAPI worker threads. Serialize inference
-    # so two simultaneous requests cannot mutate the same pipeline state.
+    # so simultaneous requests cannot mutate the same pipeline state.
     with runtime.inference_lock:
         pipeline = _load_pipeline(language)
         generator = pipeline(
@@ -110,60 +122,73 @@ def _synthesize_wav(
         return buffer.getvalue()
 
 
-def _warmup_chinese_pipeline() -> None:
+def _warmup_chinese_voices() -> None:
     if not WARMUP_ON_START:
         print("Kokoro startup warm-up is disabled.", flush=True)
         return
 
     language: Literal["zh", "en"] = "zh"
-    voice = DEFAULT_ZH_VOICE
     speed = 1.0
     text = WARMUP_TEXT_ZH.strip()
-    cache_key = (language, voice, speed, text)
 
     with runtime.lock:
         runtime.warmup_started_at = time.time()
         runtime.warmup_completed_at = None
-        runtime.warmup_error = None
-        runtime.warmup_voice = voice
-        runtime.warmup_cache_key = None
-        runtime.warmup_audio = None
+        runtime.warmup_cache.clear()
+        runtime.warmup_errors.clear()
 
-    print(f"Warming up Kokoro Mandarin pipeline with voice '{voice}'...", flush=True)
-    started = time.perf_counter()
-    try:
-        audio = _synthesize_wav(text=text, language=language, voice=voice, speed=speed)
-        elapsed = time.perf_counter() - started
-        with runtime.lock:
-            runtime.warmup_completed_at = time.time()
-            runtime.warmup_cache_key = cache_key
-            runtime.warmup_audio = audio
-        print(
-            f"Kokoro Mandarin warm-up completed in {elapsed:.2f}s; welcome audio cached ({len(audio)} bytes).",
-            flush=True,
-        )
-    except Exception as exc:  # pragma: no cover - runtime environment specific
-        elapsed = time.perf_counter() - started
-        with runtime.lock:
-            runtime.warmup_completed_at = time.time()
-            runtime.warmup_error = str(exc)
-        # Keep the service available so the main backend can still use its
-        # OpenAI/browser fallbacks if local warm-up fails.
-        print(f"Kokoro warm-up failed after {elapsed:.2f}s: {exc}", flush=True)
+    print(
+        "Warming up Kokoro Mandarin voices: " + ", ".join(WARMUP_ZH_VOICES),
+        flush=True,
+    )
+    total_started = time.perf_counter()
+
+    for voice in WARMUP_ZH_VOICES:
+        started = time.perf_counter()
+        cache_key = (language, voice, speed, text)
+        try:
+            audio = _synthesize_wav(text=text, language=language, voice=voice, speed=speed)
+            elapsed = time.perf_counter() - started
+            with runtime.lock:
+                runtime.warmup_cache[cache_key] = audio
+            print(
+                f"Kokoro voice '{voice}' warm-up completed in {elapsed:.2f}s; "
+                f"welcome audio cached ({len(audio)} bytes).",
+                flush=True,
+            )
+        except Exception as exc:  # pragma: no cover - runtime environment specific
+            elapsed = time.perf_counter() - started
+            with runtime.lock:
+                runtime.warmup_errors[voice] = str(exc)
+            # Continue warming the remaining voices. The main backend still has
+            # OpenAI/browser fallbacks if one local voice is unavailable.
+            print(f"Kokoro voice '{voice}' warm-up failed after {elapsed:.2f}s: {exc}", flush=True)
+
+    with runtime.lock:
+        runtime.warmup_completed_at = time.time()
+        cached_count = len(runtime.warmup_cache)
+        error_count = len(runtime.warmup_errors)
+
+    total_elapsed = time.perf_counter() - total_started
+    print(
+        f"Kokoro Mandarin warm-up finished in {total_elapsed:.2f}s; "
+        f"cached={cached_count}, errors={error_count}.",
+        flush=True,
+    )
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # Deliberately complete model/voice loading before Uvicorn reports the
-    # application as ready. The first customer click then reuses cached welcome
-    # audio instead of paying the cold-start cost.
-    _warmup_chinese_pipeline()
+    # Finish loading and caching all four selectable Mandarin voices before
+    # Uvicorn reports the service as ready. Customer-facing voice changes then
+    # avoid first-use model/voice latency.
+    _warmup_chinese_voices()
     yield
 
 
 app = FastAPI(
     title="Local Kokoro TTS Server",
-    version="0.2.0",
+    version="0.3.0",
     description="Standalone local TTS server for the wood-floor greeter demo.",
     lifespan=lifespan,
 )
@@ -187,8 +212,16 @@ def health() -> dict:
     with runtime.lock:
         warmup_elapsed_seconds = None
         if runtime.warmup_started_at is not None and runtime.warmup_completed_at is not None:
-            warmup_elapsed_seconds = round(runtime.warmup_completed_at - runtime.warmup_started_at, 3)
+            warmup_elapsed_seconds = round(
+                runtime.warmup_completed_at - runtime.warmup_started_at,
+                3,
+            )
 
+        cached_voices = sorted({cache_key[1] for cache_key in runtime.warmup_cache})
+        warmup_error = (
+            "; ".join(f"{voice}: {message}" for voice, message in runtime.warmup_errors.items())
+            or None
+        )
         return {
             "ok": True,
             "engine": "kokoro",
@@ -200,12 +233,15 @@ def health() -> dict:
             "default_zh_voice": DEFAULT_ZH_VOICE,
             "sample_rate": SAMPLE_RATE,
             "warmup_enabled": WARMUP_ON_START,
-            "warmup_ready": runtime.warmup_audio is not None,
-            "warmup_voice": runtime.warmup_voice,
+            "warmup_ready": all(voice in cached_voices for voice in WARMUP_ZH_VOICES),
+            "warmup_voice": DEFAULT_ZH_VOICE,
+            "warmup_voices": list(WARMUP_ZH_VOICES),
+            "warmup_cached_voices": cached_voices,
             "warmup_started_at": runtime.warmup_started_at,
             "warmup_completed_at": runtime.warmup_completed_at,
             "warmup_elapsed_seconds": warmup_elapsed_seconds,
-            "warmup_error": runtime.warmup_error,
+            "warmup_error": warmup_error,
+            "warmup_errors": dict(runtime.warmup_errors),
         }
 
 
@@ -234,13 +270,14 @@ def tts(request: LocalTTSRequest) -> Response:
     cache_key = (language, voice, request.speed, text)
 
     with runtime.lock:
-        if runtime.warmup_audio is not None and runtime.warmup_cache_key == cache_key:
-            return _audio_response(
-                audio=runtime.warmup_audio,
-                language=language,
-                voice=voice,
-                cache_status="warmup-hit",
-            )
+        cached_audio = runtime.warmup_cache.get(cache_key)
+    if cached_audio is not None:
+        return _audio_response(
+            audio=cached_audio,
+            language=language,
+            voice=voice,
+            cache_status="warmup-hit",
+        )
 
     try:
         audio = _synthesize_wav(
