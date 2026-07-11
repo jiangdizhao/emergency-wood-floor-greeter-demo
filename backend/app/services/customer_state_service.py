@@ -6,7 +6,10 @@ from ..models import CustomerProfile
 
 class CustomerStateService:
     def apply(self, *, profile: CustomerProfile, validation: ValidationResult) -> CustomerProfile:
-        if not validation.ok:
+        # Apply only actions that survived the shared validation guard. A turn
+        # may be partially understood: safe actions are retained while the
+        # unresolved part is clarified in the next assistant response.
+        if not validation.can_apply:
             return profile.model_copy(deep=True)
 
         updated = profile.model_copy(deep=True)
