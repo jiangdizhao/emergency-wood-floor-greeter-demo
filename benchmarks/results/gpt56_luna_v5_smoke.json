@@ -1,0 +1,414 @@
+{
+  "benchmark_version": "5.0-cross-provider",
+  "started_at": "2026-07-11T13:14:36.624419+10:00",
+  "modes": [
+    "luna_only"
+  ],
+  "repeat_requested": 1,
+  "stopped_early": false,
+  "models": {
+    "qwen": "qwen3.5:4b",
+    "luna": "gpt-5.6-luna",
+    "terra": "gpt-5.6-terra"
+  },
+  "endpoints": {
+    "ollama": "http://127.0.0.1:11434",
+    "openai": "https://api.openai.com/v1"
+  },
+  "gate": {
+    "min_confidence": 0.8,
+    "min_coverage": 0.6,
+    "policy": "Schema/value/evidence/internal-consistency/coverage validation only; no case-specific phrase router is used."
+  },
+  "api_key_handling": "OPENAI_API_KEY was read from the process environment and was not logged or written to this report.",
+  "openai_price_assumptions_per_mtok": {
+    "luna": {
+      "input": 1.0,
+      "output": 6.0
+    },
+    "terra": {
+      "input": 2.5,
+      "output": 15.0
+    }
+  },
+  "cost_note": "Estimated cost uses total input/output tokens at configured standard rates and does not apply cached-input discounts.",
+  "qwen_preload_seconds": null,
+  "summary_by_mode": {
+    "luna_only": {
+      "passed": 2,
+      "total": 2,
+      "pass_rate": 1.0,
+      "latency": {
+        "mean": 2.375105599996459,
+        "p50": 2.375105599996459,
+        "p95": 3.3176499999972293,
+        "max": 3.3176499999972293
+      },
+      "estimated_cost_usd": 0.005125,
+      "escalations": 0,
+      "escalation_rate": 0.0,
+      "selected_provider_counts": {
+        "luna": 2
+      },
+      "category_summary": {
+        "intent_boundary": {
+          "passed": 1,
+          "total": 1,
+          "pass_rate": 1.0
+        },
+        "paraphrase": {
+          "passed": 1,
+          "total": 1,
+          "pass_rate": 1.0
+        }
+      }
+    }
+  },
+  "provider_call_count": {
+    "luna": 2
+  },
+  "results": [
+    {
+      "case_id": "G01_colloquial_living_room",
+      "category": "paraphrase",
+      "mode": "luna_only",
+      "passed": true,
+      "failures": [],
+      "selected_provider": "luna",
+      "selected_model": "gpt-5.6-luna",
+      "escalated": false,
+      "attempts": [
+        {
+          "provider": "luna",
+          "model": "gpt-5.6-luna",
+          "ok": true,
+          "seconds": 3.3176499999972293,
+          "usage": {
+            "input_tokens": 1181,
+            "output_tokens": 300,
+            "cached_input_tokens": 0
+          },
+          "estimated_cost_usd": 0.002981,
+          "response_status": "completed",
+          "error": "",
+          "raw_parse": {
+            "intent": "provide_or_modify_needs",
+            "is_question": false,
+            "explicit_self_context": true,
+            "recommendation_requested": false,
+            "mentioned_products": [],
+            "mentioned_colors": [],
+            "field_updates": [
+              {
+                "field": "room_type",
+                "value": "客厅",
+                "scope": "persistent",
+                "evidence": "打算铺客厅"
+              },
+              {
+                "field": "budget",
+                "value": "经济",
+                "scope": "persistent",
+                "evidence": "价格按经济档来"
+              },
+              {
+                "field": "has_pets",
+                "value": "yes",
+                "scope": "persistent",
+                "evidence": "家里两只猫"
+              }
+            ],
+            "priority_updates": [
+              {
+                "name": "耐磨",
+                "level": "high",
+                "scope": "persistent",
+                "evidence": "耐磨和好打理最重要"
+              },
+              {
+                "name": "好清洁",
+                "level": "high",
+                "scope": "persistent",
+                "evidence": "耐磨和好打理最重要"
+              }
+            ],
+            "color_preferences": [],
+            "product_preferences": [],
+            "coverage_items": [
+              {
+                "evidence": "打算铺客厅",
+                "disposition": "state_change",
+                "reason": "明确房间需求"
+              },
+              {
+                "evidence": "家里两只猫",
+                "disposition": "state_change",
+                "reason": "明确家庭宠物情况"
+              },
+              {
+                "evidence": "价格按经济档来",
+                "disposition": "state_change",
+                "reason": "明确预算档位"
+              },
+              {
+                "evidence": "耐磨和好打理最重要",
+                "disposition": "state_change",
+                "reason": "明确优先级"
+              }
+            ],
+            "coverage_complete": true,
+            "confidence": 1,
+            "needs_clarification": false,
+            "clarification_reason": ""
+          },
+          "sanitized_parse": {
+            "intent": "provide_or_modify_needs",
+            "is_question": false,
+            "explicit_self_context": true,
+            "recommendation_requested": false,
+            "mentioned_products": [],
+            "mentioned_colors": [],
+            "coverage_complete": true,
+            "confidence": 1.0,
+            "needs_clarification": false,
+            "clarification_reason": "",
+            "coverage_ratio": 1.0
+          },
+          "accepted": {
+            "field_updates": [
+              {
+                "field": "room_type",
+                "value": "客厅",
+                "scope": "persistent",
+                "evidence": "打算铺客厅"
+              },
+              {
+                "field": "budget",
+                "value": "经济",
+                "scope": "persistent",
+                "evidence": "价格按经济档来"
+              },
+              {
+                "field": "has_pets",
+                "value": "yes",
+                "scope": "persistent",
+                "evidence": "家里两只猫"
+              }
+            ],
+            "priority_updates": [
+              {
+                "name": "耐磨",
+                "level": "high",
+                "scope": "persistent",
+                "evidence": "耐磨和好打理最重要"
+              },
+              {
+                "name": "好清洁",
+                "level": "high",
+                "scope": "persistent",
+                "evidence": "耐磨和好打理最重要"
+              }
+            ],
+            "color_preferences": [],
+            "product_preferences": []
+          },
+          "rejected": [],
+          "coverage_items": [
+            {
+              "evidence": "打算铺客厅",
+              "disposition": "state_change",
+              "reason": "明确房间需求"
+            },
+            {
+              "evidence": "家里两只猫",
+              "disposition": "state_change",
+              "reason": "明确家庭宠物情况"
+            },
+            {
+              "evidence": "价格按经济档来",
+              "disposition": "state_change",
+              "reason": "明确预算档位"
+            },
+            {
+              "evidence": "耐磨和好打理最重要",
+              "disposition": "state_change",
+              "reason": "明确优先级"
+            }
+          ],
+          "validation_errors": [],
+          "gate_reasons": [],
+          "gate_passed": true
+        }
+      ],
+      "final_parse": {
+        "intent": "provide_or_modify_needs",
+        "is_question": false,
+        "explicit_self_context": true,
+        "recommendation_requested": false,
+        "mentioned_products": [],
+        "mentioned_colors": [],
+        "coverage_complete": true,
+        "confidence": 1.0,
+        "needs_clarification": false,
+        "clarification_reason": "",
+        "coverage_ratio": 1.0
+      },
+      "accepted": {
+        "field_updates": [
+          {
+            "field": "room_type",
+            "value": "客厅",
+            "scope": "persistent",
+            "evidence": "打算铺客厅"
+          },
+          {
+            "field": "budget",
+            "value": "经济",
+            "scope": "persistent",
+            "evidence": "价格按经济档来"
+          },
+          {
+            "field": "has_pets",
+            "value": "yes",
+            "scope": "persistent",
+            "evidence": "家里两只猫"
+          }
+        ],
+        "priority_updates": [
+          {
+            "name": "耐磨",
+            "level": "high",
+            "scope": "persistent",
+            "evidence": "耐磨和好打理最重要"
+          },
+          {
+            "name": "好清洁",
+            "level": "high",
+            "scope": "persistent",
+            "evidence": "耐磨和好打理最重要"
+          }
+        ],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "latency_seconds": 3.3176499999972293,
+      "estimated_cost_usd": 0.002981
+    },
+    {
+      "case_id": "G15_reason_without_why_keyword",
+      "category": "intent_boundary",
+      "mode": "luna_only",
+      "passed": true,
+      "failures": [],
+      "selected_provider": "luna",
+      "selected_model": "gpt-5.6-luna",
+      "escalated": false,
+      "attempts": [
+        {
+          "provider": "luna",
+          "model": "gpt-5.6-luna",
+          "ok": true,
+          "seconds": 1.432561199995689,
+          "usage": {
+            "input_tokens": 1172,
+            "output_tokens": 162,
+            "cached_input_tokens": 0
+          },
+          "estimated_cost_usd": 0.002144,
+          "response_status": "completed",
+          "error": "",
+          "raw_parse": {
+            "intent": "ask_reason",
+            "is_question": true,
+            "explicit_self_context": false,
+            "recommendation_requested": false,
+            "mentioned_products": [
+              "多层实木"
+            ],
+            "mentioned_colors": [],
+            "field_updates": [],
+            "priority_updates": [],
+            "color_preferences": [],
+            "product_preferences": [],
+            "coverage_items": [
+              {
+                "evidence": "多层实木看着也不错",
+                "disposition": "context_only",
+                "reason": "表达对多层实木的认可，但未明确形成偏好更新"
+              },
+              {
+                "evidence": "怎么没把它放在首选？",
+                "disposition": "intent_only",
+                "reason": "询问未将该产品列为首选的原因"
+              }
+            ],
+            "coverage_complete": true,
+            "confidence": 0.98,
+            "needs_clarification": false,
+            "clarification_reason": ""
+          },
+          "sanitized_parse": {
+            "intent": "ask_reason",
+            "is_question": true,
+            "explicit_self_context": false,
+            "recommendation_requested": false,
+            "mentioned_products": [
+              "多层实木"
+            ],
+            "mentioned_colors": [],
+            "coverage_complete": true,
+            "confidence": 0.98,
+            "needs_clarification": false,
+            "clarification_reason": "",
+            "coverage_ratio": 1.0
+          },
+          "accepted": {
+            "field_updates": [],
+            "priority_updates": [],
+            "color_preferences": [],
+            "product_preferences": []
+          },
+          "rejected": [],
+          "coverage_items": [
+            {
+              "evidence": "多层实木看着也不错",
+              "disposition": "context_only",
+              "reason": "表达对多层实木的认可，但未明确形成偏好更新"
+            },
+            {
+              "evidence": "怎么没把它放在首选？",
+              "disposition": "intent_only",
+              "reason": "询问未将该产品列为首选的原因"
+            }
+          ],
+          "validation_errors": [],
+          "gate_reasons": [],
+          "gate_passed": true
+        }
+      ],
+      "final_parse": {
+        "intent": "ask_reason",
+        "is_question": true,
+        "explicit_self_context": false,
+        "recommendation_requested": false,
+        "mentioned_products": [
+          "多层实木"
+        ],
+        "mentioned_colors": [],
+        "coverage_complete": true,
+        "confidence": 0.98,
+        "needs_clarification": false,
+        "clarification_reason": "",
+        "coverage_ratio": 1.0
+      },
+      "accepted": {
+        "field_updates": [],
+        "priority_updates": [],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "latency_seconds": 1.432561199995689,
+      "estimated_cost_usd": 0.002144
+    }
+  ]
+}
