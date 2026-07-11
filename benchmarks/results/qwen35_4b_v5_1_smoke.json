@@ -1,0 +1,703 @@
+{
+  "benchmark_version": "5.1-compact-cascade",
+  "started_at": "2026-07-11T15:38:30.793785+10:00",
+  "modes": [
+    "qwen_only"
+  ],
+  "repeat_requested": 1,
+  "stopped_early": false,
+  "models": {
+    "qwen": "qwen3.5:4b",
+    "luna": "gpt-5.6-luna",
+    "terra": "gpt-5.6-terra"
+  },
+  "endpoints": {
+    "ollama": "http://127.0.0.1:11434",
+    "openai": "https://api.openai.com/v1"
+  },
+  "api_key_handling": "OPENAI_API_KEY was read from the process environment and was not logged or written to this report.",
+  "compact_parser": {
+    "max_qwen_output_tokens": 500,
+    "natural_language_coverage_reasons_removed": true,
+    "scope_computed_by_backend": true,
+    "asr_text_normalization": "remove whitespace before model and evidence validation"
+  },
+  "gate": {
+    "min_confidence": 0.8,
+    "min_claim_coverage": 1.0,
+    "policy": "Provider-neutral domain claim completeness, semantic coherence, evidence, enums, conflicts, and dangerous rejection checks. Harmless empty noise alone does not escalate."
+  },
+  "metrics": {
+    "hard_task_pass": "intent, recommendation flag, entities, required state actions, scope, and no persistent pollution",
+    "metadata_pass": "explicit_self_context only; not used as a hard business failure",
+    "state_pollution_count": "accepted state tuples not present in the benchmark expectation",
+    "critical_state_pollution_count": "wrong value/scope for an expected key, forbidden field, unexpected reject, or persistent write in a no-persistent case",
+    "gate_false_accept": "gate passed a provider parse that failed hard task evaluation",
+    "gate_false_reject": "gate rejected a provider parse that passed hard task evaluation"
+  },
+  "openai_price_assumptions_per_mtok": {
+    "luna": {
+      "input": 1.0,
+      "output": 6.0
+    },
+    "terra": {
+      "input": 2.5,
+      "output": 15.0
+    }
+  },
+  "qwen_preload_seconds": 7.571738900005585,
+  "summary_by_mode": {
+    "qwen_only": {
+      "hard_task_passed": 3,
+      "metadata_passed": 4,
+      "total": 4,
+      "hard_task_pass_rate": 0.75,
+      "metadata_pass_rate": 1.0,
+      "state_pollution_count": 0,
+      "critical_state_pollution_count": 0,
+      "latency": {
+        "mean": 2.9275589999997464,
+        "p50": 2.8496452499966836,
+        "p95": 3.406172899994999,
+        "max": 3.406172899994999
+      },
+      "estimated_cost_usd": 0.0,
+      "escalations": 0,
+      "escalation_rate": 0.0,
+      "selected_provider_counts": {
+        "qwen": 4
+      },
+      "category_summary": {
+        "asr_noise": {
+          "hard_task_passed": 1,
+          "total": 1,
+          "hard_task_pass_rate": 1.0
+        },
+        "correction_negation": {
+          "hard_task_passed": 1,
+          "total": 1,
+          "hard_task_pass_rate": 1.0
+        },
+        "paraphrase": {
+          "hard_task_passed": 0,
+          "total": 1,
+          "hard_task_pass_rate": 0.0
+        },
+        "scope": {
+          "hard_task_passed": 1,
+          "total": 1,
+          "hard_task_pass_rate": 1.0
+        }
+      }
+    }
+  },
+  "gate_diagnostics_by_provider": {
+    "qwen": {
+      "attempts": 4,
+      "true_accept": 3,
+      "false_accept": 0,
+      "true_reject": 1,
+      "false_reject": 0,
+      "false_accept_rate_among_hard_failures": 0.0,
+      "false_reject_rate_among_hard_passes": 0.0,
+      "gate_accuracy": 1.0
+    }
+  },
+  "provider_call_count": {
+    "qwen": 4
+  },
+  "results": [
+    {
+      "case_id": "G01_colloquial_living_room",
+      "category": "paraphrase",
+      "mode": "qwen_only",
+      "hard_task_pass": false,
+      "metadata_pass": true,
+      "hard_failures": [
+        "missing priority update: 耐磨|high|persistent",
+        "missing priority update: 好清洁|high|persistent"
+      ],
+      "metadata_failures": [],
+      "state_pollution_count": 0,
+      "critical_state_pollution_count": 0,
+      "selected_provider": "qwen",
+      "selected_model": "qwen3.5:4b",
+      "escalated": false,
+      "attempts": [
+        {
+          "provider": "qwen",
+          "model": "qwen3.5:4b",
+          "ok": true,
+          "seconds": 3.406172899994999,
+          "usage": {
+            "input_tokens": 533,
+            "output_tokens": 183,
+            "cached_input_tokens": 0
+          },
+          "estimated_cost_usd": 0.0,
+          "response_status": "stop",
+          "error": "",
+          "raw_parse": {
+            "intent": "provide_or_modify_needs",
+            "is_question": false,
+            "explicit_self_context": true,
+            "recommendation_requested": false,
+            "actions": [
+              {
+                "kind": "set_field",
+                "name": "room_type",
+                "value": "客厅",
+                "evidence": "打算铺客厅"
+              },
+              {
+                "kind": "set_field",
+                "name": "has_pets",
+                "value": "yes",
+                "evidence": "家里两只猫"
+              },
+              {
+                "kind": "set_field",
+                "name": "budget",
+                "value": "经济",
+                "evidence": "价格按经济档来"
+              }
+            ],
+            "uncertain": false,
+            "confidence": 0.95
+          },
+          "normalized_text": "打算铺客厅，家里两只猫，价格按经济档来，耐磨和好打理最重要。",
+          "sanitized_parse": {
+            "intent": "provide_or_modify_needs",
+            "is_question": false,
+            "explicit_self_context": true,
+            "backend_self_context": true,
+            "recommendation_requested": false,
+            "mentioned_products": [],
+            "mentioned_colors": [],
+            "uncertain": false,
+            "confidence": 0.95,
+            "claim_coverage": 0.6
+          },
+          "accepted": {
+            "field_updates": [
+              {
+                "field": "room_type",
+                "value": "客厅",
+                "scope": "persistent",
+                "evidence": "打算铺客厅"
+              },
+              {
+                "field": "has_pets",
+                "value": "yes",
+                "scope": "persistent",
+                "evidence": "家里两只猫"
+              },
+              {
+                "field": "budget",
+                "value": "经济",
+                "scope": "persistent",
+                "evidence": "价格按经济档来"
+              }
+            ],
+            "priority_updates": [],
+            "color_preferences": [],
+            "product_preferences": []
+          },
+          "rejected": [],
+          "validation_errors": [],
+          "expected_claims": [
+            {
+              "kind": "field",
+              "name": "room_type",
+              "value": "客厅"
+            },
+            {
+              "kind": "field",
+              "name": "budget",
+              "value": "经济"
+            },
+            {
+              "kind": "field",
+              "name": "has_pets",
+              "value": "yes"
+            },
+            {
+              "kind": "priority",
+              "name": "耐磨",
+              "value": "high"
+            },
+            {
+              "kind": "priority",
+              "name": "好清洁",
+              "value": "high"
+            }
+          ],
+          "missing_claims": [
+            {
+              "kind": "priority",
+              "name": "耐磨",
+              "value": "high"
+            },
+            {
+              "kind": "priority",
+              "name": "好清洁",
+              "value": "high"
+            }
+          ],
+          "claim_coverage": 0.6,
+          "gate_reasons": [
+            "claim_coverage:0.600<1.000",
+            "missing_claims:priority:耐磨=high,priority:好清洁=high"
+          ],
+          "gate_passed": false,
+          "hard_failures": [
+            "missing priority update: 耐磨|high|persistent",
+            "missing priority update: 好清洁|high|persistent"
+          ],
+          "metadata_failures": [],
+          "state_pollution_count": 0,
+          "critical_state_pollution_count": 0
+        }
+      ],
+      "final_parse": {
+        "intent": "provide_or_modify_needs",
+        "is_question": false,
+        "explicit_self_context": true,
+        "backend_self_context": true,
+        "recommendation_requested": false,
+        "mentioned_products": [],
+        "mentioned_colors": [],
+        "uncertain": false,
+        "confidence": 0.95,
+        "claim_coverage": 0.6
+      },
+      "accepted": {
+        "field_updates": [
+          {
+            "field": "room_type",
+            "value": "客厅",
+            "scope": "persistent",
+            "evidence": "打算铺客厅"
+          },
+          {
+            "field": "has_pets",
+            "value": "yes",
+            "scope": "persistent",
+            "evidence": "家里两只猫"
+          },
+          {
+            "field": "budget",
+            "value": "经济",
+            "scope": "persistent",
+            "evidence": "价格按经济档来"
+          }
+        ],
+        "priority_updates": [],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "latency_seconds": 3.406172899994999,
+      "estimated_cost_usd": 0.0
+    },
+    {
+      "case_id": "G11_pet_correction",
+      "category": "correction_negation",
+      "mode": "qwen_only",
+      "hard_task_pass": true,
+      "metadata_pass": true,
+      "hard_failures": [],
+      "metadata_failures": [],
+      "state_pollution_count": 0,
+      "critical_state_pollution_count": 0,
+      "selected_provider": "qwen",
+      "selected_model": "qwen3.5:4b",
+      "escalated": false,
+      "attempts": [
+        {
+          "provider": "qwen",
+          "model": "qwen3.5:4b",
+          "ok": true,
+          "seconds": 2.6047726000106195,
+          "usage": {
+            "input_tokens": 533,
+            "output_tokens": 112,
+            "cached_input_tokens": 0
+          },
+          "estimated_cost_usd": 0.0,
+          "response_status": "stop",
+          "error": "",
+          "raw_parse": {
+            "intent": "provide_or_modify_needs",
+            "is_question": false,
+            "explicit_self_context": true,
+            "recommendation_requested": false,
+            "actions": [
+              {
+                "kind": "set_field",
+                "name": "has_pets",
+                "value": "no",
+                "evidence": "家里没养猫也没养狗。"
+              }
+            ],
+            "uncertain": false,
+            "confidence": 0.95
+          },
+          "normalized_text": "刚才说有宠物不对，家里没养猫也没养狗。",
+          "sanitized_parse": {
+            "intent": "provide_or_modify_needs",
+            "is_question": false,
+            "explicit_self_context": true,
+            "backend_self_context": true,
+            "recommendation_requested": false,
+            "mentioned_products": [],
+            "mentioned_colors": [],
+            "uncertain": false,
+            "confidence": 0.95,
+            "claim_coverage": 1.0
+          },
+          "accepted": {
+            "field_updates": [
+              {
+                "field": "has_pets",
+                "value": "no",
+                "scope": "persistent",
+                "evidence": "家里没养猫也没养狗。"
+              }
+            ],
+            "priority_updates": [],
+            "color_preferences": [],
+            "product_preferences": []
+          },
+          "rejected": [],
+          "validation_errors": [],
+          "expected_claims": [
+            {
+              "kind": "field",
+              "name": "has_pets",
+              "value": "no"
+            }
+          ],
+          "missing_claims": [],
+          "claim_coverage": 1.0,
+          "gate_reasons": [],
+          "gate_passed": true,
+          "hard_failures": [],
+          "metadata_failures": [],
+          "state_pollution_count": 0,
+          "critical_state_pollution_count": 0
+        }
+      ],
+      "final_parse": {
+        "intent": "provide_or_modify_needs",
+        "is_question": false,
+        "explicit_self_context": true,
+        "backend_self_context": true,
+        "recommendation_requested": false,
+        "mentioned_products": [],
+        "mentioned_colors": [],
+        "uncertain": false,
+        "confidence": 0.95,
+        "claim_coverage": 1.0
+      },
+      "accepted": {
+        "field_updates": [
+          {
+            "field": "has_pets",
+            "value": "no",
+            "scope": "persistent",
+            "evidence": "家里没养猫也没养狗。"
+          }
+        ],
+        "priority_updates": [],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "latency_seconds": 2.6047726000106195,
+      "estimated_cost_usd": 0.0
+    },
+    {
+      "case_id": "G21_generic_comparison_scope",
+      "category": "scope",
+      "mode": "qwen_only",
+      "hard_task_pass": true,
+      "metadata_pass": true,
+      "hard_failures": [],
+      "metadata_failures": [],
+      "state_pollution_count": 0,
+      "critical_state_pollution_count": 0,
+      "selected_provider": "qwen",
+      "selected_model": "qwen3.5:4b",
+      "escalated": false,
+      "attempts": [
+        {
+          "provider": "qwen",
+          "model": "qwen3.5:4b",
+          "ok": true,
+          "seconds": 2.957944999987376,
+          "usage": {
+            "input_tokens": 527,
+            "output_tokens": 150,
+            "cached_input_tokens": 0
+          },
+          "estimated_cost_usd": 0.0,
+          "response_status": "stop",
+          "error": "",
+          "raw_parse": {
+            "intent": "request_comparison",
+            "is_question": true,
+            "explicit_self_context": false,
+            "recommendation_requested": true,
+            "actions": [
+              {
+                "kind": "set_field",
+                "name": "has_pets",
+                "value": "yes",
+                "evidence": "养猫"
+              },
+              {
+                "kind": "set_field",
+                "name": "has_floor_heating",
+                "value": "yes",
+                "evidence": "地暖的家庭"
+              }
+            ],
+            "uncertain": false,
+            "confidence": 0.95
+          },
+          "normalized_text": "养猫又有地暖的家庭，SPC和多层实木怎么选？",
+          "sanitized_parse": {
+            "intent": "request_comparison",
+            "is_question": true,
+            "explicit_self_context": false,
+            "backend_self_context": false,
+            "recommendation_requested": true,
+            "mentioned_products": [
+              "SPC",
+              "多层实木"
+            ],
+            "mentioned_colors": [],
+            "uncertain": false,
+            "confidence": 0.95,
+            "claim_coverage": 1.0
+          },
+          "accepted": {
+            "field_updates": [
+              {
+                "field": "has_pets",
+                "value": "yes",
+                "scope": "turn_only",
+                "evidence": "养猫"
+              },
+              {
+                "field": "has_floor_heating",
+                "value": "yes",
+                "scope": "turn_only",
+                "evidence": "地暖的家庭"
+              }
+            ],
+            "priority_updates": [],
+            "color_preferences": [],
+            "product_preferences": []
+          },
+          "rejected": [],
+          "validation_errors": [],
+          "expected_claims": [
+            {
+              "kind": "field",
+              "name": "has_floor_heating",
+              "value": "yes"
+            },
+            {
+              "kind": "field",
+              "name": "has_pets",
+              "value": "yes"
+            }
+          ],
+          "missing_claims": [],
+          "claim_coverage": 1.0,
+          "gate_reasons": [],
+          "gate_passed": true,
+          "hard_failures": [],
+          "metadata_failures": [],
+          "state_pollution_count": 0,
+          "critical_state_pollution_count": 0
+        }
+      ],
+      "final_parse": {
+        "intent": "request_comparison",
+        "is_question": true,
+        "explicit_self_context": false,
+        "backend_self_context": false,
+        "recommendation_requested": true,
+        "mentioned_products": [
+          "SPC",
+          "多层实木"
+        ],
+        "mentioned_colors": [],
+        "uncertain": false,
+        "confidence": 0.95,
+        "claim_coverage": 1.0
+      },
+      "accepted": {
+        "field_updates": [
+          {
+            "field": "has_pets",
+            "value": "yes",
+            "scope": "turn_only",
+            "evidence": "养猫"
+          },
+          {
+            "field": "has_floor_heating",
+            "value": "yes",
+            "scope": "turn_only",
+            "evidence": "地暖的家庭"
+          }
+        ],
+        "priority_updates": [],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "latency_seconds": 2.957944999987376,
+      "estimated_cost_usd": 0.0
+    },
+    {
+      "case_id": "G26_character_spacing",
+      "category": "asr_noise",
+      "mode": "qwen_only",
+      "hard_task_pass": true,
+      "metadata_pass": true,
+      "hard_failures": [],
+      "metadata_failures": [],
+      "state_pollution_count": 0,
+      "critical_state_pollution_count": 0,
+      "selected_provider": "qwen",
+      "selected_model": "qwen3.5:4b",
+      "escalated": false,
+      "attempts": [
+        {
+          "provider": "qwen",
+          "model": "qwen3.5:4b",
+          "ok": true,
+          "seconds": 2.741345500005991,
+          "usage": {
+            "input_tokens": 519,
+            "output_tokens": 123,
+            "cached_input_tokens": 0
+          },
+          "estimated_cost_usd": 0.0,
+          "response_status": "stop",
+          "error": "",
+          "raw_parse": {
+            "intent": "provide_or_modify_needs",
+            "is_question": false,
+            "explicit_self_context": true,
+            "recommendation_requested": false,
+            "actions": [
+              {
+                "kind": "set_field",
+                "name": "has_floor_heating",
+                "value": "no",
+                "evidence": "没有地暖"
+              },
+              {
+                "kind": "set_field",
+                "name": "room_type",
+                "value": "卧室",
+                "evidence": "卧室"
+              }
+            ],
+            "uncertain": false,
+            "confidence": 0.95
+          },
+          "normalized_text": "我家没有地暖卧室用",
+          "sanitized_parse": {
+            "intent": "provide_or_modify_needs",
+            "is_question": false,
+            "explicit_self_context": true,
+            "backend_self_context": true,
+            "recommendation_requested": false,
+            "mentioned_products": [],
+            "mentioned_colors": [],
+            "uncertain": false,
+            "confidence": 0.95,
+            "claim_coverage": 1.0
+          },
+          "accepted": {
+            "field_updates": [
+              {
+                "field": "has_floor_heating",
+                "value": "no",
+                "scope": "persistent",
+                "evidence": "没有地暖"
+              },
+              {
+                "field": "room_type",
+                "value": "卧室",
+                "scope": "persistent",
+                "evidence": "卧室"
+              }
+            ],
+            "priority_updates": [],
+            "color_preferences": [],
+            "product_preferences": []
+          },
+          "rejected": [],
+          "validation_errors": [],
+          "expected_claims": [
+            {
+              "kind": "field",
+              "name": "room_type",
+              "value": "卧室"
+            },
+            {
+              "kind": "field",
+              "name": "has_floor_heating",
+              "value": "no"
+            }
+          ],
+          "missing_claims": [],
+          "claim_coverage": 1.0,
+          "gate_reasons": [],
+          "gate_passed": true,
+          "hard_failures": [],
+          "metadata_failures": [],
+          "state_pollution_count": 0,
+          "critical_state_pollution_count": 0
+        }
+      ],
+      "final_parse": {
+        "intent": "provide_or_modify_needs",
+        "is_question": false,
+        "explicit_self_context": true,
+        "backend_self_context": true,
+        "recommendation_requested": false,
+        "mentioned_products": [],
+        "mentioned_colors": [],
+        "uncertain": false,
+        "confidence": 0.95,
+        "claim_coverage": 1.0
+      },
+      "accepted": {
+        "field_updates": [
+          {
+            "field": "has_floor_heating",
+            "value": "no",
+            "scope": "persistent",
+            "evidence": "没有地暖"
+          },
+          {
+            "field": "room_type",
+            "value": "卧室",
+            "scope": "persistent",
+            "evidence": "卧室"
+          }
+        ],
+        "priority_updates": [],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "latency_seconds": 2.741345500005991,
+      "estimated_cost_usd": 0.0
+    }
+  ]
+}
