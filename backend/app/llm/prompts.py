@@ -33,6 +33,8 @@ PARSE_SYSTEM_PROMPT = """
 13. 若 dialogue_context.pending_slot 非空，客户可能只用一个短语回答上一轮问题。例如 pending_slot=preferred_color 且客户说“灰色”，应提取 prefer_color，而不是把它当成无法理解的修改。
 14. last_assistant_question 只用于理解当前短回答，不得把问题中的内容复制成客户事实。
 15. 语音识别可能有误。若当前文本与 pending_slot 不匹配，不要猜测，设置 uncertain=true。
+16. current_profile 中的 memory_summary 和 previous_visit_summaries 只在客户已确认回访身份后出现。它们是已确认的历史背景，可用于理解“上次那个、继续之前方案”等指代，但不能被复制为本轮新动作。
+17. 历史背景与客户最新话语冲突时，以最新话语为准，并只输出客户本轮明确表达的修改。
 
 只输出符合 JSON Schema 的对象。
 """.strip()
@@ -58,6 +60,42 @@ QWEN_RENDER_SYSTEM_PROMPT = """
 最多三句话。只输出回答正文。
 """.strip()
 
+SAFE_PROFILE_FIELDS = (
+    "room_type",
+    "style",
+    "budget",
+    "has_pets",
+    "has_floor_heating",
+    "has_children",
+    "has_elderly",
+    "humid_environment",
+    "priorities",
+    "preferred_colors",
+    "rejected_colors",
+    "preferred_product_ids",
+    "rejected_product_ids",
+    "special_needs",
+    "concerns",
+    "recommended_product_ids",
+    "conversation_summary",
+    "is_returning_customer",
+    "memory_summary",
+    "previous_visit_summaries",
+)
+
+
+def _minimal_profile_context(current_profile: dict) -> dict:
+    """Remove identity/contact/internal fields before any LLM provider sees context."""
+    output: dict = {}
+    for key in SAFE_PROFILE_FIELDS:
+        value = current_profile.get(key)
+        if value in (None, "", [], {}):
+            continue
+        if key == "previous_visit_summaries" and isinstance(value, list):
+            value = value[:2]
+        output[key] = value
+    return output
+
 
 def build_parse_user_prompt(
     user_text: str,
@@ -65,8 +103,9 @@ def build_parse_user_prompt(
     dialogue_context: dict | None = None,
 ) -> str:
     return (
-        "当前客户状态仅用于理解‘改成、不是、其实’等修改，不得把旧值复制为新动作：\n"
-        + json.dumps(current_profile, ensure_ascii=False, separators=(",", ":"))
+        "当前客户状态和已确认历史仅用于理解‘改成、不是、其实、继续上次’等表达，"
+        "不得把旧值复制为本轮新动作：\n"
+        + json.dumps(_minimal_profile_context(current_profile), ensure_ascii=False, separators=(",", ":"))
         + "\n\n当前对话上下文：\n"
         + json.dumps(dialogue_context or {}, ensure_ascii=False, separators=(",", ":"))
         + "\n\n客户最新话语：\n"
