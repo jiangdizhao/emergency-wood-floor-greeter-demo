@@ -45,7 +45,9 @@ class IdentityService:
         self.enrollment_samples = max(4, int(os.getenv("FACE_ENROLLMENT_SAMPLES", "10")))
         self.max_templates_per_customer = max(3, int(os.getenv("FACE_MAX_TEMPLATES", "5")))
         self.capture_interval_seconds = float(os.getenv("FACE_CAPTURE_INTERVAL_SECONDS", "0.16"))
-        self.candidate_ttl_seconds = float(os.getenv("FACE_CANDIDATE_TTL_SECONDS", "30"))
+        # Thirty seconds was too short for a customer-facing confirmation dialog.
+        # Keep the token local and temporary, but allow a realistic decision window.
+        self.candidate_ttl_seconds = float(os.getenv("FACE_CANDIDATE_TTL_SECONDS", "180"))
         self._operation_lock = threading.RLock()
         self._candidate_lock = threading.RLock()
         self._candidates: dict[str, IdentityCandidate] = {}
@@ -62,6 +64,7 @@ class IdentityService:
             "min_votes": self.min_votes,
             "recognition_samples": self.sample_count,
             "candidate_count": len(self._candidates),
+            "candidate_ttl_seconds": int(self.candidate_ttl_seconds),
             "stores_raw_photos": False,
             "requires_confirmation": True,
         }
@@ -180,7 +183,18 @@ class IdentityService:
             "message": "可能找到了之前的本地选购记录，请由客户确认是否继续。",
         }
 
-    def consume_candidate(self, token: str, *, accepted: bool) -> IdentityCandidate | None:
+    def get_candidate(self, token: str) -> IdentityCandidate | None:
+        """Read a live candidate without consuming it.
+
+        Session creation can still fail because of a transient file, database, or
+        frontend interruption. Keeping the token until the confirmation flow has
+        completed makes the dialog safely retryable instead of trapping the user.
+        """
+        with self._candidate_lock:
+            self._purge_expired_candidates_locked()
+            return self._candidates.get(token)
+
+    def finalize_candidate(self, token: str, *, accepted: bool) -> IdentityCandidate | None:
         with self._candidate_lock:
             self._purge_expired_candidates_locked()
             candidate = self._candidates.pop(token, None)
@@ -193,6 +207,10 @@ class IdentityService:
             detail=f"votes={candidate.votes};samples={candidate.sample_count}",
         )
         return candidate
+
+    def consume_candidate(self, token: str, *, accepted: bool) -> IdentityCandidate | None:
+        """Backward-compatible alias for callers that truly want one-step consume."""
+        return self.finalize_candidate(token, accepted=accepted)
 
     def enroll(
         self,
