@@ -88,7 +88,7 @@ class RecommendationService:
             and not self._color_matches_any(product.color, profile.rejected_colors)
         ]
         if not candidates:
-            candidates = self.product_service.list_products()
+            return []
 
         scored = [(self._score_product(product, profile), product) for product in candidates]
         scored.sort(key=lambda item: (item[0], item[1].id), reverse=True)
