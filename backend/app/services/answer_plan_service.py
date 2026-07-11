@@ -256,8 +256,9 @@ class AnswerPlanService:
         facts.extend(product.selling_points[:3])
 
         reasons: list[str] = []
-        if profile.primary_purchase_driver:
-            reasons.append(f"围绕您最重视的{profile.primary_purchase_driver}进行匹配")
+        driver_reason = self._driver_match_reason(product, profile.primary_purchase_driver)
+        if driver_reason:
+            reasons.append(driver_reason)
         if profile.room_type and profile.room_type in product.suitable_rooms:
             reasons.append(f"适合{profile.room_type}")
         if profile.budget and profile.budget == product.price_range:
@@ -281,6 +282,12 @@ class AnswerPlanService:
         ):
             reasons.append("符合颜色偏好")
 
+        tradeoffs = self.sales_knowledge_service.product_tradeoffs(product)
+        if profile.primary_purchase_driver == "环保":
+            disclaimer = "当前演示产品数据未提供可核验的环保认证或检测信息，不能据此作环保承诺"
+            if disclaimer not in tradeoffs:
+                tradeoffs.append(disclaimer)
+
         return ApprovedProductFact(
             product_id=product.id,
             name=product.name,
@@ -289,9 +296,29 @@ class AnswerPlanService:
             price_range=product.price_range,
             presentation_role=presentation_role,  # type: ignore[arg-type]
             approved_facts=facts,
-            match_reasons=reasons,
-            tradeoffs=self.sales_knowledge_service.product_tradeoffs(product),
+            match_reasons=self._unique_strings(reasons),
+            tradeoffs=self._unique_strings(tradeoffs)[:3],
         )
+
+    @staticmethod
+    def _driver_match_reason(product: FlooringProduct, driver: str | None) -> str | None:
+        if driver == "防水" and product.waterproof:
+            return "符合您把防水放在首位的要求"
+        if driver == "耐磨" and product.wear_level.upper() in {"AC4", "AC5", "高"}:
+            return "符合您把耐磨放在首位的要求"
+        if driver == "价格" and product.price_range in {"经济", "中等"}:
+            return "符合您优先控制预算的要求"
+        if driver == "脚感" and product.type in {"多层实木", "三层实木", "实木"}:
+            return "符合您把脚感放在首位的要求"
+        if driver == "好清洁" and (product.waterproof or product.pet_friendly):
+            return "符合您把日常好清洁放在首位的要求"
+        if driver == "环保" and any(
+            marker in point
+            for point in product.selling_points
+            for marker in ("环保", "低醛", "认证", "检测")
+        ):
+            return "产品资料中包含与环保相关的批准信息"
+        return None
 
     @staticmethod
     def _need_summary(profile: CustomerProfile) -> list[str]:
@@ -351,7 +378,7 @@ class AnswerPlanService:
             backup = products[1]
             return (
                 f"在{primary.name}和{backup.name}这两个方向里，"
-                "您更想优先保留核心性能，还是更看重脚感、外观或预算上的平衡？"
+                "您现在最重视的是核心性能、脚感、外观，还是预算上的平衡？"
             )
         if not profile.preferred_colors and not profile.rejected_colors:
             return "这个性能方向您是否认可？如果认可，我再帮您把颜色和整体风格收窄。"
@@ -376,4 +403,12 @@ class AnswerPlanService:
             if product.id not in seen:
                 output.append(product)
                 seen.add(product.id)
+        return output
+
+    @staticmethod
+    def _unique_strings(values: list[str]) -> list[str]:
+        output: list[str] = []
+        for value in values:
+            if value and value not in output:
+                output.append(value)
         return output
