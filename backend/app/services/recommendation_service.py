@@ -9,6 +9,7 @@ class RecommendationService:
         self.product_service = product_service
 
     def extract_needs_from_text(self, text: str, profile: CustomerProfile) -> CustomerProfile:
+        """Legacy keyword parser retained only as a deterministic fallback/debug helper."""
         normalized = text.lower().replace(" ", "")
         english = text.lower()
         updated = profile.model_copy(deep=True)
@@ -74,53 +75,98 @@ class RecommendationService:
         for label, keywords in special_map.items():
             if any(keyword in normalized or keyword in english for keyword in keywords):
                 self._append_unique(updated.special_needs, label)
-
         for label, keywords in concern_map.items():
             if any(keyword in normalized or keyword in english for keyword in keywords):
                 self._append_unique(updated.concerns, label)
-
         return updated
 
     def recommend(self, profile: CustomerProfile, limit: int = 2) -> list[FlooringProduct]:
-        scored: list[tuple[int, FlooringProduct]] = []
-        for product in self.product_service.list_products():
-            score = self._score_product(product, profile)
-            scored.append((score, product))
-        scored.sort(key=lambda item: item[0], reverse=True)
-        return [product for score, product in scored[:limit] if score > 0] or [p for _, p in scored[:limit]]
+        candidates = [
+            product
+            for product in self.product_service.list_products()
+            if product.id not in profile.rejected_product_ids
+            and not self._color_matches_any(product.color, profile.rejected_colors)
+        ]
+        if not candidates:
+            candidates = self.product_service.list_products()
+
+        scored = [(self._score_product(product, profile), product) for product in candidates]
+        scored.sort(key=lambda item: (item[0], item[1].id), reverse=True)
+        positive = [product for score, product in scored if score > 0]
+        return (positive or [product for _, product in scored])[:limit]
 
     def _score_product(self, product: FlooringProduct, profile: CustomerProfile) -> int:
         score = 0
+        if product.id in profile.preferred_product_ids:
+            score += 8
+        if self._color_matches_any(product.color, profile.preferred_colors):
+            score += 3
         if profile.room_type and profile.room_type in product.suitable_rooms:
-            score += 2
-        if profile.style and any(profile.style in s or s in profile.style for s in product.style):
+            score += 3
+        if profile.style and any(profile.style in style or style in profile.style for style in product.style):
             score += 2
         if profile.budget and profile.budget == product.price_range:
-            score += 2
+            score += 3
 
+        if profile.has_pets is True and product.pet_friendly:
+            score += 4
+        if profile.has_floor_heating is True and product.floor_heating:
+            score += 4
+        if profile.has_children is True and product.child_friendly:
+            score += 3
+        if profile.has_elderly is True and product.child_friendly:
+            score += 2
+        if profile.humid_environment is True and product.waterproof:
+            score += 4
+
+        weights = {"high": 4, "medium": 2, "low": 1}
+        for priority, level in profile.priorities.items():
+            weight = weights.get(level, 0)
+            if priority == "防水" and product.waterproof:
+                score += weight
+            elif priority == "耐磨" and product.wear_level.upper() in {"AC4", "AC5", "高"}:
+                score += weight
+            elif priority == "价格" and product.price_range in {"经济", "中等"}:
+                score += weight
+            elif priority == "脚感" and product.type in {"多层实木", "三层实木", "实木"}:
+                score += weight
+            elif priority == "好清洁" and (product.waterproof or product.pet_friendly):
+                score += weight
+            elif priority == "环保" and any("环保" in point or "低醛" in point for point in product.selling_points):
+                score += weight
+
+        # Backward-compatible signals from older session files.
         needs = set(profile.special_needs)
         concerns = set(profile.concerns)
         if "宠物" in needs and product.pet_friendly:
-            score += 3
-        if "地暖" in needs and product.floor_heating:
-            score += 3
-        if "儿童" in needs and product.child_friendly:
             score += 2
+        if "地暖" in needs and product.floor_heating:
+            score += 2
+        if "儿童" in needs and product.child_friendly:
+            score += 1
         if "老人" in needs and product.child_friendly:
             score += 1
         if "潮湿环境" in needs and product.waterproof:
-            score += 3
+            score += 2
         if "好打理" in needs and (product.waterproof or product.pet_friendly):
-            score += 2
+            score += 1
         if "防水" in concerns and product.waterproof:
-            score += 3
+            score += 1
         if "耐磨" in concerns and product.wear_level.upper() in {"AC4", "AC5", "高"}:
-            score += 2
-        if "价格" in concerns and product.price_range in {"经济", "中等"}:
             score += 1
         if "脚感" in concerns and product.type in {"多层实木", "三层实木", "实木"}:
-            score += 2
+            score += 1
         return score
+
+    @staticmethod
+    def _color_matches_any(product_color: str, preferences: list[str]) -> bool:
+        normalized_product = product_color.replace("色", "")
+        return any(
+            preference.replace("色", "") in normalized_product
+            or normalized_product in preference.replace("色", "")
+            for preference in preferences
+            if preference
+        )
 
     @staticmethod
     def _append_unique(values: list[str], value: str) -> None:
