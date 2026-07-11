@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from abc import ABC, abstractmethod
 from typing import Any
@@ -27,7 +26,13 @@ class DialogueLLMProvider(ABC):
     display_name: str
 
     @abstractmethod
-    def parse_turn(self, *, user_text: str, current_profile: CustomerProfile) -> SemanticTurn:
+    def parse_turn(
+        self,
+        *,
+        user_text: str,
+        current_profile: CustomerProfile,
+        dialogue_context: dict[str, Any] | None = None,
+    ) -> SemanticTurn:
         raise NotImplementedError
 
     @abstractmethod
@@ -73,9 +78,7 @@ class TerraDialogueProvider(DialogueLLMProvider):
         except requests.RequestException as exc:
             raise DialogueProviderError(f"OpenAI request failed: {exc}") from exc
         if response.status_code >= 400:
-            raise DialogueProviderError(
-                f"OpenAI HTTP {response.status_code}: {response.text[:500]}"
-            )
+            raise DialogueProviderError(f"OpenAI HTTP {response.status_code}: {response.text[:500]}")
         try:
             return response.json()
         except ValueError as exc:
@@ -102,15 +105,24 @@ class TerraDialogueProvider(DialogueLLMProvider):
             raise DialogueProviderError(f"OpenAI response contained no output text; status={response.get('status')}")
         return text
 
-    def parse_turn(self, *, user_text: str, current_profile: CustomerProfile) -> SemanticTurn:
-        schema = SEMANTIC_TURN_JSON_SCHEMA
+    def parse_turn(
+        self,
+        *,
+        user_text: str,
+        current_profile: CustomerProfile,
+        dialogue_context: dict[str, Any] | None = None,
+    ) -> SemanticTurn:
         payload = {
             "model": self.model,
             "input": [
                 {"role": "system", "content": PARSE_SYSTEM_PROMPT},
                 {
                     "role": "user",
-                    "content": build_parse_user_prompt(user_text, current_profile.model_dump()),
+                    "content": build_parse_user_prompt(
+                        user_text,
+                        current_profile.model_dump(),
+                        dialogue_context,
+                    ),
                 },
             ],
             "reasoning": {"effort": "none"},
@@ -119,7 +131,7 @@ class TerraDialogueProvider(DialogueLLMProvider):
                     "type": "json_schema",
                     "name": "flooring_semantic_turn",
                     "strict": True,
-                    "schema": schema,
+                    "schema": SEMANTIC_TURN_JSON_SCHEMA,
                 }
             },
             "max_output_tokens": 800,
@@ -132,7 +144,11 @@ class TerraDialogueProvider(DialogueLLMProvider):
             raise DialogueProviderError(f"Terra semantic output failed validation: {exc}") from exc
 
     def render_answer(self, *, answer_plan: AnswerPlan) -> str:
-        if answer_plan.direct_message and answer_plan.response_type in {"clarification", "service_unavailable"}:
+        if answer_plan.direct_message and answer_plan.response_type in {
+            "clarification",
+            "acknowledgement",
+            "service_unavailable",
+        }:
             return answer_plan.direct_message
         payload = {
             "model": self.model,
@@ -184,14 +200,24 @@ class QwenDialogueProvider(DialogueLLMProvider):
         except ValueError as exc:
             raise DialogueProviderError("Ollama returned invalid JSON") from exc
 
-    def parse_turn(self, *, user_text: str, current_profile: CustomerProfile) -> SemanticTurn:
+    def parse_turn(
+        self,
+        *,
+        user_text: str,
+        current_profile: CustomerProfile,
+        dialogue_context: dict[str, Any] | None = None,
+    ) -> SemanticTurn:
         payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": PARSE_SYSTEM_PROMPT},
                 {
                     "role": "user",
-                    "content": build_parse_user_prompt(user_text, current_profile.model_dump()),
+                    "content": build_parse_user_prompt(
+                        user_text,
+                        current_profile.model_dump(),
+                        dialogue_context,
+                    ),
                 },
             ],
             "stream": False,
@@ -214,7 +240,11 @@ class QwenDialogueProvider(DialogueLLMProvider):
             raise DialogueProviderError(f"Qwen semantic output failed validation: {exc}") from exc
 
     def render_answer(self, *, answer_plan: AnswerPlan) -> str:
-        if answer_plan.direct_message and answer_plan.response_type in {"clarification", "service_unavailable"}:
+        if answer_plan.direct_message and answer_plan.response_type in {
+            "clarification",
+            "acknowledgement",
+            "service_unavailable",
+        }:
             return answer_plan.direct_message
         payload = {
             "model": self.model,
