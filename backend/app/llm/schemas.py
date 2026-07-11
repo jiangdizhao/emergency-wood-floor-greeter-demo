@@ -24,6 +24,13 @@ ActionKind = Literal[
     "reject_product",
 ]
 ActionScope = Literal["persistent", "turn_only"]
+DecisionAction = Literal[
+    "clarify",
+    "ask_missing_slot",
+    "acknowledge",
+    "recommend_now",
+    "compare_now",
+]
 
 
 class SemanticAction(BaseModel):
@@ -56,6 +63,9 @@ class ValidatedAction(SemanticAction):
 
 class ValidationResult(BaseModel):
     ok: bool
+    can_apply: bool = False
+    needs_clarification: bool = False
+    critical_conflict: bool = False
     normalized_text: str
     semantic_turn: SemanticTurn
     backend_self_context: bool
@@ -66,6 +76,13 @@ class ValidationResult(BaseModel):
     rejected_actions: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     clarification_question: str | None = None
+
+
+class DialogueDecision(BaseModel):
+    action: DecisionAction
+    reason: str
+    pending_slot: Literal["room_type", "budget", "style", "preferred_color", "priority"] | None = None
+    question: str | None = None
 
 
 class ApprovedProductFact(BaseModel):
@@ -92,6 +109,8 @@ class AnswerPlan(BaseModel):
     constraints: list[str] = Field(default_factory=list)
     next_question: str | None = None
     direct_message: str | None = None
+    must_recommend_now: bool = False
+    allow_future_commitment: bool = False
 
 
 SEMANTIC_TURN_JSON_SCHEMA: dict = {
