@@ -11,14 +11,22 @@
   margin-top: 1rem;
 }
 
+/* Identity dialogs sit above the normal app alert. Raise alerts above the dialog
+   as well, otherwise a failed/expired confirmation looks like a dead button. */
+.friendly-alert {
+  z-index: 2200;
+}
+
 .identity-backdrop {
   z-index: 1000;
   background: rgba(34, 24, 18, 0.58);
   backdrop-filter: blur(5px);
+  pointer-events: auto;
 }
 
 .identity-modal {
   position: relative;
+  z-index: 1;
   width: min(92vw, 560px);
   max-height: 88vh;
   overflow-y: auto;
@@ -27,6 +35,7 @@
   background: #fffdf9;
   box-shadow: 0 28px 80px rgba(40, 25, 17, 0.28);
   text-align: center;
+  pointer-events: auto;
 }
 
 .identity-symbol {
@@ -78,6 +87,12 @@
 .identity-choice-grid button {
   min-height: 48px;
   border-radius: 14px;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.identity-choice-grid button:disabled {
+  pointer-events: none;
 }
 
 .identity-close {
