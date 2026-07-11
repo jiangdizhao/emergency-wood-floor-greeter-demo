@@ -53,6 +53,14 @@ class DialoguePolicy:
                 or "我没有完全听清。请只说一个最重要的条件。",
             )
 
+        # A direct question about an existing product or recommendation must be
+        # answered before the proactive sales policy starts another recommendation.
+        if turn.intent in {"ask_reason", "general_product_question"}:
+            return DialogueDecision(
+                action="acknowledge",
+                reason="answer the customer's product or rationale question first",
+            )
+
         if self._profile_is_ready(profile):
             if context.pending_slot is not None or validation.can_apply:
                 return DialogueDecision(
