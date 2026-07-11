@@ -1,13 +1,40 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ui</title>
+    <title>木地板 AI 选购顾问</title>
+    <style>
+      .privacy-data-entry {
+        position: fixed;
+        z-index: 80;
+        right: 18px;
+        bottom: 16px;
+        padding: 9px 14px;
+        border: 1px solid rgba(112, 76, 55, 0.2);
+        border-radius: 999px;
+        background: rgba(255, 253, 249, 0.9);
+        box-shadow: 0 8px 22px rgba(71, 47, 34, 0.12);
+        color: #76503b;
+        font-family: Inter, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+        font-size: 13px;
+        font-weight: 750;
+        text-decoration: none;
+        backdrop-filter: blur(10px);
+      }
+
+      .privacy-data-entry:hover {
+        background: #fffaf5;
+        transform: translateY(-1px);
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <a class="privacy-data-entry" href="/delete-my-data.html" aria-label="查看并删除我的本地数据">
+      隐私与数据
+    </a>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
