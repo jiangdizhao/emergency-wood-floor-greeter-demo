@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+DialogueProvider = Literal["terra", "qwen"]
+
 
 class SessionState(str, Enum):
     IDLE = "IDLE"
@@ -40,6 +42,19 @@ class CustomerProfile(BaseModel):
     room_type: str | None = None
     style: str | None = None
     budget: str | None = None
+
+    has_pets: bool | None = None
+    has_floor_heating: bool | None = None
+    has_children: bool | None = None
+    has_elderly: bool | None = None
+    humid_environment: bool | None = None
+    priorities: dict[str, str] = Field(default_factory=dict)
+    preferred_colors: list[str] = Field(default_factory=list)
+    rejected_colors: list[str] = Field(default_factory=list)
+    preferred_product_ids: list[str] = Field(default_factory=list)
+    rejected_product_ids: list[str] = Field(default_factory=list)
+
+    # Kept for backward compatibility with the current UI and deterministic scorer.
     special_needs: list[str] = Field(default_factory=list)
     concerns: list[str] = Field(default_factory=list)
     recommended_product_ids: list[str] = Field(default_factory=list)
@@ -69,6 +84,7 @@ class ChatRequest(BaseModel):
     text: str
     session_id: str = "demo-session-001"
     response_language: Literal["zh", "en"] | None = None
+    provider_mode: DialogueProvider | None = None
 
 
 class ChatResponse(BaseModel):
@@ -77,6 +93,10 @@ class ChatResponse(BaseModel):
     customer_profile: CustomerProfile
     follow_up_suggestion: str
     state: SessionState
+    provider_mode: DialogueProvider = "qwen"
+    provider_label: str = "Private Local AI · Qwen 3.5"
+    llm_degraded: bool = False
+    needs_clarification: bool = False
 
 
 class TTSRequest(BaseModel):
@@ -100,6 +120,20 @@ class SessionStatusResponse(BaseModel):
     state: SessionState
     status: dict[str, Any]
     customer_profile: CustomerProfile
+    provider_mode: DialogueProvider = "qwen"
+    provider_label: str = "Private Local AI · Qwen 3.5"
+
+
+class ProviderModeRequest(BaseModel):
+    session_id: str = "demo-session-001"
+    provider_mode: DialogueProvider
+
+
+class ProviderModeResponse(BaseModel):
+    ok: bool = True
+    session_id: str
+    provider_mode: DialogueProvider
+    provider_label: str
 
 
 class CustomerSaveRequest(BaseModel):
