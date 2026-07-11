@@ -369,7 +369,12 @@ class IdentityRepository:
                 (customer_id, session_id, event_type, score, detail, utc_now()),
             )
 
-    def delete_customer(self, customer_id: str) -> bool:
+    def delete_customer(self, customer_id: str, *, delete_history: bool = True) -> bool:
+        """Delete biometric identity and optionally delete conversation history.
+
+        When delete_history is False, prior sessions remain in SQLite but are
+        anonymized by clearing their customer_id before the customer row is removed.
+        """
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT customer_id FROM customers WHERE customer_id = ?",
@@ -377,5 +382,15 @@ class IdentityRepository:
             ).fetchone()
             if not row:
                 return False
+            if delete_history:
+                connection.execute(
+                    "DELETE FROM conversation_sessions WHERE customer_id = ?",
+                    (customer_id,),
+                )
+            else:
+                connection.execute(
+                    "UPDATE conversation_sessions SET customer_id = NULL WHERE customer_id = ?",
+                    (customer_id,),
+                )
             connection.execute("DELETE FROM customers WHERE customer_id = ?", (customer_id,))
         return True
