@@ -14,9 +14,13 @@ from .sales_knowledge_service import SalesKnowledgeService
 
 
 class AnswerPlanService:
-    def __init__(self, product_service: ProductService, sales_knowledge_service: SalesKnowledgeService) -> None:
+    def __init__(
+        self,
+        product_service: ProductService,
+        sales_knowledge_service: SalesKnowledgeService | None = None,
+    ) -> None:
         self.product_service = product_service
-        self.sales_knowledge_service = sales_knowledge_service
+        self.sales_knowledge_service = sales_knowledge_service or SalesKnowledgeService()
 
     def build(
         self,
