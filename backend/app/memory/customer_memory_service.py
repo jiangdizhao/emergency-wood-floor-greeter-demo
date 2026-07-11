@@ -8,6 +8,7 @@ from ..identity.repository import IdentityRepository
 from ..models import CustomerProfile, DialogueProvider, IdentityChoice, IdentitySessionResponse
 from ..services.dialogue_context_service import DialogueContextService
 from ..services.lead_service import LeadService
+from ..services.sales_knowledge_service import SalesKnowledgeService
 from ..services.session_runtime_service import SessionRuntimeService
 
 
@@ -32,6 +33,7 @@ class CustomerMemoryService:
         self.lead_service = lead_service
         self.runtime_service = runtime_service
         self.context_service = context_service
+        self.sales_knowledge_service = SalesKnowledgeService()
 
     def new_anonymous_session(
         self,
@@ -42,7 +44,7 @@ class CustomerMemoryService:
         provider = self._provider(provider_mode)
         profile = CustomerProfile(session_id=session_id)
         self.lead_service.save_profile(profile)
-        self._set_room_question_context(session_id)
+        self._set_opening_question_context(session_id)
         self.runtime_service.set_provider(session_id, provider)
         self.repository.create_or_update_session(
             session_id=session_id,
@@ -54,10 +56,7 @@ class CustomerMemoryService:
             session_id=session_id,
             customer_profile=profile,
             returning_customer=False,
-            greeting=(
-                "您好，欢迎来到木地板体验区。我是您的 AI 选购顾问小木。"
-                "请问您这次主要想为哪个空间选择地板呢？"
-            ),
+            greeting=self.sales_knowledge_service.new_customer_greeting(),
             provider_mode=provider,
             provider_label=self.runtime_service.provider_label(provider),
             memory_loaded=False,
@@ -117,7 +116,7 @@ class CustomerMemoryService:
             )
             greeting = self._new_project_greeting(profile)
             returning_context = profile.memory_summary
-            self._set_room_question_context(session_id)
+            self._set_opening_question_context(session_id)
 
         self.lead_service.save_profile(profile)
         self.runtime_service.set_provider(session_id, provider)
@@ -207,13 +206,16 @@ class CustomerMemoryService:
             self.lead_service.save_profile(profile)
         return deleted
 
-    def _set_room_question_context(self, session_id: str) -> None:
+    def _set_opening_question_context(self, session_id: str) -> None:
         context = self.context_service.reset(session_id)
         self.context_service.save(
             context.model_copy(
                 update={
-                    "pending_slot": "room_type",
-                    "last_assistant_question": "您这次主要想为哪个空间选择地板呢？",
+                    "pending_slot": "priority",
+                    "last_assistant_question": (
+                        "这次选地板，您最不愿意妥协的是哪一点："
+                        "预算、耐磨、防水、脚感、环保，还是日常好清洁？"
+                    ),
                 }
             )
         )
@@ -305,6 +307,8 @@ class CustomerMemoryService:
     @staticmethod
     def _profile_memory_sentence(profile: CustomerProfile) -> str:
         parts: list[str] = []
+        if profile.primary_purchase_driver:
+            parts.append(f"首要需求={profile.primary_purchase_driver}")
         if profile.room_type:
             parts.append(f"空间={profile.room_type}")
         if profile.style:
@@ -331,9 +335,10 @@ class CustomerMemoryService:
         if summary:
             return (
                 "欢迎回来。您已确认继续上次的选购记录。"
-                f"我记得的重点是：{summary} 您想沿着这个方案继续，还是先调整其中一个条件？"
+                f"我记得的重点是：{summary} "
+                "这次您想继续看上次的主推方案，还是先告诉我哪一点发生了变化？"
             )
-        return "欢迎回来。您已确认继续上次的选购记录。您想先看上次的推荐，还是调整需求？"
+        return "欢迎回来。您已确认继续上次的选购记录。您想先看上次的主推方案，还是调整核心需求？"
 
     @staticmethod
     def _new_project_greeting(profile: CustomerProfile) -> str:
@@ -347,6 +352,12 @@ class CustomerMemoryService:
         if profile.has_elderly is True:
             stable.append("有老人")
         background = "、".join(stable)
-        if background:
-            return f"欢迎回来。这次我们开始一个新的选购项目，我会保留“{background}”这些家庭背景。请问这次主要为哪个空间选地板？"
-        return "欢迎回来。这次我们开始一个新的选购项目。请问这次主要为哪个空间选地板？"
+        prefix = (
+            f"欢迎回来。这次我们开始一个新的选购项目，我会保留“{background}”这些家庭背景。"
+            if background
+            else "欢迎回来。这次我们开始一个新的选购项目。"
+        )
+        return (
+            prefix
+            + "为了避免沿用上次项目的判断，请先告诉我：这次您最不愿意妥协的是预算、耐磨、防水、脚感、环保，还是日常好清洁？"
+        )
