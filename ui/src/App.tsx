@@ -12,18 +12,23 @@ import {
 } from 'lucide-react'
 import './App.css'
 import './AgentSelector.css'
+import './IdentityMemory.css'
 import {
   compareProducts,
+  confirmIdentity,
+  enrollIdentity,
   getProducts,
-  getSessionStatus,
-  resetSession,
+  recognizeIdentity,
   sendChat,
   sendDemoEvent,
+  startNewIdentitySession,
   startVision,
   synthesizeSpeech,
   type CompareRow,
   type CustomerProfile,
   type FlooringProduct,
+  type IdentityChoice,
+  type IdentitySessionResponse,
 } from './api'
 
 type ChatMessage = {
@@ -151,6 +156,11 @@ const QUICK_PROMPTS = [
 
 const INITIAL_PROFILE: CustomerProfile = {
   session_id: 'demo-session-001',
+  customer_id: null,
+  is_returning_customer: false,
+  memory_summary: '',
+  previous_visit_summaries: [],
+  last_seen_at: null,
   customer_name: null,
   phone: null,
   room_type: null,
@@ -208,6 +218,7 @@ function buildSummary(profile: CustomerProfile, recommendedProducts: FlooringPro
 function App() {
   const [screenMode, setScreenMode] = useState<ScreenMode>('welcome')
   const [selectedConsultantId, setSelectedConsultantId] = useState<ConsultantId>('yunxi')
+  const [sessionId, setSessionId] = useState('demo-session-001')
   const [products, setProducts] = useState<FlooringProduct[]>([])
   const [recommendedProducts, setRecommendedProducts] = useState<FlooringProduct[]>([])
   const [profile, setProfile] = useState<CustomerProfile>(INITIAL_PROFILE)
@@ -221,6 +232,13 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('idle')
   const [lastTranscript, setLastTranscript] = useState('')
+
+  const [identityCandidateToken, setIdentityCandidateToken] = useState<string | null>(null)
+  const [identityPromptOpen, setIdentityPromptOpen] = useState(false)
+  const [identityMessage, setIdentityMessage] = useState('')
+  const [enrollmentOpen, setEnrollmentOpen] = useState(false)
+  const [enrollmentName, setEnrollmentName] = useState('')
+  const [enrollmentConsent, setEnrollmentConsent] = useState(false)
 
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -248,8 +266,6 @@ function App() {
 
   useEffect(() => {
     void loadInitialData()
-    // The camera remains available to the backend for future customer recognition,
-    // but no camera image or engineering telemetry is exposed in the customer UI.
     void startVision().catch((visionError: unknown) => {
       console.warn('Background vision service is unavailable:', visionError)
     })
@@ -273,11 +289,8 @@ function App() {
 
   async function loadInitialData() {
     try {
-      const [catalog, session] = await Promise.all([getProducts(), getSessionStatus()])
+      const catalog = await getProducts()
       setProducts(catalog.products)
-      setProfile(session.customer_profile)
-      const savedIds = new Set(session.customer_profile.recommended_product_ids)
-      setRecommendedProducts(catalog.products.filter((product) => savedIds.has(product.id)))
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError))
     }
@@ -336,9 +349,6 @@ function App() {
     stopSpeaking()
     setVoiceStatus('speaking')
     try {
-      // Use the explicitly selected Kokoro voice first. If the local service is
-      // unavailable, retry the normal auto chain without forwarding a Kokoro-only
-      // voice name to the OpenAI fallback.
       const audioBlob = await synthesizeSpeech(text, 'zh', 'local', consultant.voice)
       await playAudioBlob(audioBlob)
     } catch (localTtsError) {
@@ -378,23 +388,73 @@ function App() {
     if (playPreview) await speakText(consultant.previewText, consultant)
   }
 
+  async function activateSession(session: IdentitySessionResponse) {
+    setSessionId(session.session_id)
+    setProfile(session.customer_profile)
+    const savedIds = new Set(session.customer_profile.recommended_product_ids)
+    setRecommendedProducts(products.filter((product) => savedIds.has(product.id)))
+    setCompareIds([])
+    setCompareRows([])
+    setInputText('')
+    setLastTranscript('')
+    setSummaryText('')
+    setMessages([createMessage('agent', session.greeting)])
+    setScreenMode('conversation')
+    setIdentityMessage(session.returning_customer ? '已加载经您确认的本地历史选购记忆。' : '')
+    await sendDemoEvent('intro_started', session.session_id).catch(() => undefined)
+    await sendDemoEvent('intro_finished', session.session_id).catch(() => undefined)
+    await speakText(session.greeting)
+  }
+
   async function handleStartConsultation() {
     await runAction('start', async () => {
       cancelListening()
       stopSpeaking()
-      const session = await resetSession()
-      setProfile(session.customer_profile)
-      setRecommendedProducts([])
-      setCompareIds([])
-      setCompareRows([])
-      setInputText('')
-      setLastTranscript('')
-      setSummaryText('')
-      setMessages([createMessage('agent', INTRODUCTION)])
-      setScreenMode('conversation')
-      await sendDemoEvent('intro_started').catch(() => undefined)
-      await sendDemoEvent('intro_finished').catch(() => undefined)
-      await speakText(INTRODUCTION)
+      setIdentityMessage('正在本机检查是否存在您之前同意保存的选购记录…')
+
+      let recognition: Awaited<ReturnType<typeof recognizeIdentity>> | null = null
+      try {
+        recognition = await recognizeIdentity()
+      } catch (recognitionError) {
+        console.warn('Face identity check unavailable; starting anonymous session:', recognitionError)
+      }
+
+      if (recognition?.candidate_found && recognition.candidate_token) {
+        setIdentityCandidateToken(recognition.candidate_token)
+        setIdentityMessage(recognition.message)
+        setIdentityPromptOpen(true)
+        return
+      }
+
+      const session = await startNewIdentitySession()
+      await activateSession(session)
+    })
+  }
+
+  async function handleIdentityChoice(choice: IdentityChoice) {
+    const token = identityCandidateToken
+    if (!token) return
+    await runAction('identity', async () => {
+      const session = await confirmIdentity(token, choice)
+      setIdentityPromptOpen(false)
+      setIdentityCandidateToken(null)
+      await activateSession(session)
+    })
+  }
+
+  async function handleEnrollment() {
+    if (!enrollmentConsent) {
+      setError('请先确认您同意仅在本机保存人脸特征和本次选购记录。')
+      return
+    }
+    await runAction('enroll', async () => {
+      const result = await enrollIdentity(sessionId, true, enrollmentName)
+      if (!result.enrolled) throw new Error(result.message)
+      if (result.customer_profile) setProfile(result.customer_profile)
+      setIdentityMessage(result.message)
+      setEnrollmentOpen(false)
+      setEnrollmentConsent(false)
+      setEnrollmentName('')
     })
   }
 
@@ -405,7 +465,7 @@ function App() {
     setInputText('')
     setVoiceStatus('processing')
     try {
-      const response = await sendChat(text, 'zh')
+      const response = await sendChat(text, 'zh', sessionId)
       appendMessage('agent', response.answer)
       setRecommendedProducts(response.recommended_products)
       setProfile(response.customer_profile)
@@ -610,7 +670,7 @@ function App() {
       const summary = buildSummary(profile, recommendedProducts)
       setSummaryText(summary)
       setScreenMode('summary')
-      await sendDemoEvent('end').catch(() => undefined)
+      await sendDemoEvent('end', sessionId).catch(() => undefined)
       await speakText(`好的，我为您总结一下本次咨询。${summary}`)
     })
   }
@@ -619,8 +679,9 @@ function App() {
     await runAction('restart', async () => {
       cancelListening()
       stopSpeaking()
-      const session = await resetSession()
-      setProfile(session.customer_profile)
+      await sendDemoEvent('end', sessionId).catch(() => undefined)
+      setSessionId('demo-session-001')
+      setProfile(INITIAL_PROFILE)
       setRecommendedProducts([])
       setMessages([])
       setInputText('')
@@ -629,6 +690,7 @@ function App() {
       setSummaryText('')
       setLastTranscript('')
       setCompareOpen(false)
+      setIdentityMessage('')
       setScreenMode('welcome')
     })
   }
@@ -671,9 +733,12 @@ function App() {
             disabled={busyAction !== null}
           >
             <Sparkles size={22} />
-            {busyAction === 'start' ? '正在为您准备…' : `和${selectedConsultant.displayName}开始咨询`}
+            {busyAction === 'start' ? '正在检查本地选购记忆…' : `和${selectedConsultant.displayName}开始咨询`}
           </button>
-          <p className="privacy-note">点击头像可试听声音。摄像头画面不会显示在屏幕上。</p>
+          <p className="privacy-note">
+            摄像头画面不会显示。只有您明确同意后，才会在本机保存人脸特征和选购摘要；默认不保存原始照片。
+          </p>
+          {identityMessage && <p className="identity-inline-note">{identityMessage}</p>}
         </section>
       )}
 
@@ -688,6 +753,7 @@ function App() {
                 <strong>小木 · {selectedConsultant.displayName}</strong>
                 <span>
                   {selectedConsultant.styleName} · {voiceStatusLabel(voiceStatus)}
+                  {profile.is_returning_customer ? ' · 已确认回访记忆' : ''}
                 </span>
               </div>
             </div>
@@ -725,6 +791,12 @@ function App() {
                       : '您可以直接说出需求，也可以输入文字。'}
                 </p>
               </div>
+              {profile.is_returning_customer && profile.memory_summary && (
+                <div className="memory-context-card">
+                  <strong>已确认的历史背景</strong>
+                  <p>{profile.memory_summary}</p>
+                </div>
+              )}
               <div className="quick-start-list">
                 {QUICK_PROMPTS.map((prompt) => (
                   <button
@@ -878,6 +950,24 @@ function App() {
               </div>
             </div>
           )}
+
+          <div className="local-memory-offer">
+            <div>
+              <strong>{profile.customer_id ? '本地选购记忆已保存' : '下次继续本次方案'}</strong>
+              <p>
+                {profile.customer_id
+                  ? '系统已在本机保存人脸特征和选购摘要，未保存原始照片。'
+                  : '经您明确同意后，系统只在本机保存人脸特征和本次摘要，下次可继续咨询。'}
+              </p>
+            </div>
+            {!profile.customer_id && (
+              <button type="button" onClick={() => setEnrollmentOpen(true)} disabled={busyAction !== null}>
+                同意并保存本地记忆
+              </button>
+            )}
+          </div>
+          {identityMessage && <p className="identity-inline-note summary-note">{identityMessage}</p>}
+
           <div className="summary-actions">
             <button type="button" onClick={() => setScreenMode('conversation')}>
               继续咨询
@@ -893,6 +983,95 @@ function App() {
             </button>
           </div>
         </section>
+      )}
+
+      {identityPromptOpen && (
+        <div className="modal-backdrop identity-backdrop" role="presentation">
+          <section className="identity-modal" role="dialog" aria-modal="true" aria-label="确认历史客户记录">
+            <div className="identity-symbol">
+              <Sparkles size={28} />
+            </div>
+            <p className="identity-kicker">本地选购记忆</p>
+            <h2>欢迎回来</h2>
+            <p>{identityMessage || '我们可能找到了您之前同意保存的选购记录。'}</p>
+            <p className="identity-safety-note">确认前不会显示姓名或历史内容，避免误认造成信息泄露。</p>
+            <div className="identity-choice-grid">
+              <button
+                type="button"
+                className="primary-cta compact"
+                onClick={() => void handleIdentityChoice('continue_previous')}
+                disabled={busyAction !== null}
+              >
+                继续上次咨询
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleIdentityChoice('new_project')}
+                disabled={busyAction !== null}
+              >
+                开始新的选购项目
+              </button>
+              <button
+                type="button"
+                className="quiet-button"
+                onClick={() => void handleIdentityChoice('not_me')}
+                disabled={busyAction !== null}
+              >
+                这不是我
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {enrollmentOpen && (
+        <div className="modal-backdrop identity-backdrop" role="presentation">
+          <section className="identity-modal enrollment-modal" role="dialog" aria-modal="true" aria-label="保存本地选购记忆">
+            <button
+              type="button"
+              className="identity-close"
+              onClick={() => setEnrollmentOpen(false)}
+              aria-label="关闭"
+            >
+              <X size={20} />
+            </button>
+            <div className="identity-symbol">
+              <Check size={28} />
+            </div>
+            <p className="identity-kicker">需要您的明确同意</p>
+            <h2>保存本地选购记忆</h2>
+            <p>请正对屏幕并保持光线充足。系统会在本机保存数个人脸特征向量和本次选购摘要，不保存原始人脸照片。</p>
+            <label className="identity-name-field">
+              <span>称呼（可选）</span>
+              <input
+                value={enrollmentName}
+                onChange={(event) => setEnrollmentName(event.target.value)}
+                placeholder="例如：王先生"
+              />
+            </label>
+            <label className="identity-consent-row">
+              <input
+                type="checkbox"
+                checked={enrollmentConsent}
+                onChange={(event) => setEnrollmentConsent(event.target.checked)}
+              />
+              <span>我同意仅在本机保存人脸特征和本次选购记录，用于下次恢复咨询背景。</span>
+            </label>
+            <div className="identity-choice-grid">
+              <button
+                type="button"
+                className="primary-cta compact"
+                onClick={() => void handleEnrollment()}
+                disabled={!enrollmentConsent || busyAction !== null}
+              >
+                {busyAction === 'enroll' ? '正在采集清晰人脸…' : '同意并开始采集'}
+              </button>
+              <button type="button" onClick={() => setEnrollmentOpen(false)} disabled={busyAction !== null}>
+                暂不保存
+              </button>
+            </div>
+          </section>
+        </div>
       )}
 
       {compareOpen && (
