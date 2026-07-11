@@ -31,6 +31,22 @@ DecisionAction = Literal[
     "recommend_now",
     "compare_now",
 ]
+SalesStage = Literal[
+    "introduction",
+    "discovery",
+    "qualification",
+    "recommendation",
+    "objection_handling",
+]
+SalesNextBestAction = Literal[
+    "introduce_company",
+    "ask_primary_priority",
+    "ask_usage_context",
+    "qualify_needs",
+    "present_main_and_backup",
+    "explain_tradeoff",
+    "clarify_customer_input",
+]
 
 
 class SemanticAction(BaseModel):
@@ -85,14 +101,31 @@ class DialogueDecision(BaseModel):
     question: str | None = None
 
 
+class SalesDecision(BaseModel):
+    stage: SalesStage
+    next_best_action: SalesNextBestAction
+    objective: str
+    reason: str
+
+
+class ApprovedCollectionFact(BaseModel):
+    collection_id: str
+    name: str
+    tagline: str
+    strengths: list[str] = Field(default_factory=list)
+    tradeoffs: list[str] = Field(default_factory=list)
+
+
 class ApprovedProductFact(BaseModel):
     product_id: str
     name: str
     product_type: str
     color: str
     price_range: str
+    presentation_role: Literal["主推款", "备选款", "对比款"] = "主推款"
     approved_facts: list[str] = Field(default_factory=list)
     match_reasons: list[str] = Field(default_factory=list)
+    tradeoffs: list[str] = Field(default_factory=list)
 
 
 class AnswerPlan(BaseModel):
@@ -104,6 +137,11 @@ class AnswerPlan(BaseModel):
         "acknowledgement",
         "service_unavailable",
     ]
+    sales_stage: SalesStage = "discovery"
+    sales_objective: str = "准确回应客户当前问题"
+    next_best_action: SalesNextBestAction = "qualify_needs"
+    company_highlights: list[str] = Field(default_factory=list)
+    featured_collections: list[ApprovedCollectionFact] = Field(default_factory=list)
     customer_need_summary: list[str] = Field(default_factory=list)
     products: list[ApprovedProductFact] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
