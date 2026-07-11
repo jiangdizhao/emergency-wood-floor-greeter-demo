@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>隐私与数据 · 木地板 AI 选购顾问</title>
+    <style>
+      :root {
+        font-family:
+          Inter, "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        color: #39271f;
+        background: #f4eee7;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        background:
+          radial-gradient(circle at 8% 5%, rgba(210, 160, 119, 0.25), transparent 34%),
+          radial-gradient(circle at 95% 90%, rgba(126, 151, 112, 0.18), transparent 31%),
+          #f6f0e9;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button,
+      a {
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .page-shell {
+        width: min(820px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 42px 0 64px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 22px;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: #76503b;
+        font-weight: 800;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 36px;
+        height: 36px;
+        place-items: center;
+        border-radius: 12px;
+        background: linear-gradient(145deg, #b66f3f, #7d4529);
+        color: white;
+        box-shadow: 0 10px 24px rgba(125, 69, 41, 0.22);
+      }
+
+      .back-link {
+        padding: 9px 14px;
+        border: 1px solid rgba(126, 87, 64, 0.2);
+        border-radius: 999px;
+        background: rgba(255, 253, 249, 0.8);
+        color: #664739;
+        font-size: 14px;
+        font-weight: 750;
+        text-decoration: none;
+      }
+
+      .card {
+        overflow: hidden;
+        border: 1px solid rgba(133, 91, 67, 0.14);
+        border-radius: 28px;
+        background: rgba(255, 253, 249, 0.94);
+        box-shadow: 0 24px 70px rgba(67, 43, 31, 0.13);
+      }
+
+      .hero {
+        padding: clamp(28px, 5vw, 48px);
+        background: linear-gradient(145deg, rgba(255, 252, 247, 0.96), rgba(243, 229, 215, 0.92));
+      }
+
+      .eyebrow {
+        margin: 0 0 10px;
+        color: #a46542;
+        font-size: 13px;
+        font-weight: 850;
+        letter-spacing: 0.09em;
+      }
+
+      h1 {
+        margin: 0;
+        color: #302019;
+        font-family: "Noto Serif SC", "Songti SC", STSong, serif;
+        font-size: clamp(34px, 6vw, 54px);
+        line-height: 1.15;
+      }
+
+      .hero > p:last-child {
+        max-width: 680px;
+        margin: 18px 0 0;
+        color: #6d594e;
+        font-size: 17px;
+        line-height: 1.75;
+      }
+
+      .content {
+        display: grid;
+        gap: 20px;
+        padding: clamp(24px, 4vw, 38px);
+      }
+
+      .data-list {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .data-item {
+        min-height: 112px;
+        padding: 16px;
+        border: 1px solid rgba(133, 91, 67, 0.12);
+        border-radius: 17px;
+        background: #fffaf5;
+      }
+
+      .data-item strong {
+        display: block;
+        margin-bottom: 7px;
+        color: #573b2e;
+      }
+
+      .data-item span {
+        color: #816c60;
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .privacy-note {
+        padding: 15px 17px;
+        border-radius: 16px;
+        background: #f4ede5;
+        color: #715b4d;
+        font-size: 14px;
+        line-height: 1.65;
+      }
+
+      .action-panel {
+        padding: 20px;
+        border: 1px solid rgba(151, 103, 73, 0.18);
+        border-radius: 20px;
+        background: white;
+      }
+
+      .action-panel h2 {
+        margin: 0 0 8px;
+        font-size: 21px;
+      }
+
+      .action-panel > p {
+        margin: 0;
+        color: #756156;
+        line-height: 1.65;
+      }
+
+      .button-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 11px;
+        margin-top: 18px;
+      }
+
+      button {
+        min-height: 48px;
+        padding: 11px 18px;
+        border: 1px solid rgba(128, 85, 60, 0.2);
+        border-radius: 13px;
+        background: #fffaf5;
+        color: #654536;
+        cursor: pointer;
+        font-weight: 800;
+      }
+
+      button:hover:not(:disabled) {
+        transform: translateY(-1px);
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      .primary-button {
+        border: 0;
+        background: linear-gradient(135deg, #9c5d3c, #713a26);
+        box-shadow: 0 12px 26px rgba(118, 68, 42, 0.24);
+        color: #fffaf5;
+      }
+
+      .danger-panel {
+        display: none;
+        padding: 20px;
+        border: 1px solid rgba(173, 66, 46, 0.28);
+        border-radius: 20px;
+        background: #fff6f2;
+      }
+
+      .danger-panel.visible {
+        display: block;
+      }
+
+      .danger-panel h2 {
+        margin: 0 0 8px;
+        color: #793a2c;
+      }
+
+      .danger-panel p,
+      .danger-panel li {
+        color: #79594e;
+        line-height: 1.65;
+      }
+
+      .danger-panel ul {
+        margin: 12px 0;
+        padding-left: 22px;
+      }
+
+      .confirm-row {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        align-items: start;
+        gap: 11px;
+        margin-top: 14px;
+        padding: 14px;
+        border-radius: 14px;
+        background: white;
+        color: #67483c;
+        line-height: 1.55;
+      }
+
+      .confirm-row input {
+        width: 21px;
+        height: 21px;
+        margin-top: 1px;
+      }
+
+      .danger-button {
+        border: 0;
+        background: #9b3f31;
+        box-shadow: 0 11px 24px rgba(135, 48, 36, 0.2);
+        color: white;
+      }
+
+      .status {
+        display: none;
+        padding: 15px 17px;
+        border-radius: 15px;
+        line-height: 1.6;
+      }
+
+      .status.visible {
+        display: block;
+      }
+
+      .status.info {
+        background: #f2e7dc;
+        color: #6e4c3a;
+      }
+
+      .status.success {
+        border: 1px solid rgba(76, 122, 67, 0.2);
+        background: #edf5e9;
+        color: #45663e;
+      }
+
+      .status.error {
+        border: 1px solid rgba(171, 68, 45, 0.22);
+        background: #fff0ea;
+        color: #803b2b;
+      }
+
+      .technical-note {
+        margin: 0;
+        color: #9a897e;
+        font-size: 12px;
+        text-align: center;
+      }
+
+      @media (max-width: 720px) {
+        .page-shell {
+          width: min(100% - 20px, 820px);
+          padding-top: 20px;
+        }
+
+        .data-list {
+          grid-template-columns: 1fr;
+        }
+
+        .topbar {
+          align-items: flex-start;
+        }
+
+        .button-row button {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">✦</span>
+          <span>木地板 AI 选购顾问</span>
+        </div>
+        <a class="back-link" href="/">返回导购</a>
+      </header>
+
+      <section class="card">
+        <div class="hero">
+          <p class="eyebrow">隐私与数据</p>
+          <h1>查看并删除我的本地数据</h1>
+          <p>
+            系统会先通过当前摄像头验证您是否与本机保存的客户记录匹配。只有验证成功并再次明确确认后，才会永久删除对应数据。
+          </p>
+        </div>
+
+        <div class="content">
+          <div class="data-list" aria-label="可删除的数据类型">
+            <div class="data-item">
+              <strong>人脸特征模板</strong>
+              <span>删除本机保存的 SFace 特征向量。系统默认不保存原始人脸照片。</span>
+            </div>
+            <div class="data-item">
+              <strong>客户选购档案</strong>
+              <span>删除房间、预算、风格、颜色、家庭使用条件和推荐结果等结构化信息。</span>
+            </div>
+            <div class="data-item">
+              <strong>历史咨询记录</strong>
+              <span>删除该客户关联的历次会话摘要及完整对话轮次。</span>
+            </div>
+          </div>
+
+          <p class="privacy-note">
+            为避免他人误删数据，系统不会在验证前展示姓名或历史咨询内容。候选身份令牌只保存在当前页面内存中，不写入浏览器存储。
+          </p>
+
+          <section class="action-panel">
+            <h2>第一步：验证当前用户</h2>
+            <p>请正对摄像头、保持光线充足，然后点击下面的按钮。验证本身不会修改或删除任何数据。</p>
+            <div class="button-row">
+              <button id="recognize-button" class="primary-button" type="button">验证并查找我的本地数据</button>
+              <a class="back-link" href="/">取消并返回</a>
+            </div>
+          </section>
+
+          <div id="status" class="status" role="status" aria-live="polite"></div>
+
+          <section id="danger-panel" class="danger-panel" aria-labelledby="delete-heading">
+            <h2 id="delete-heading">第二步：确认永久删除</h2>
+            <p>系统已找到可信的本地候选记录。为保护隐私，删除前仍不会显示该记录的姓名或咨询内容。</p>
+            <ul>
+              <li>删除后，下一次将把您视为新客户。</li>
+              <li>删除后可以重新演示“同意并注册本地记忆”的完整流程。</li>
+              <li>此操作不可撤销。</li>
+            </ul>
+            <label class="confirm-row">
+              <input id="delete-confirmation" type="checkbox" />
+              <span>我确认这是我的本地数据，并要求永久删除人脸特征、客户档案和全部历史咨询记录。</span>
+            </label>
+            <div class="button-row">
+              <button id="delete-button" class="danger-button" type="button" disabled>永久删除我的本地数据</button>
+              <button id="recognize-again-button" type="button">重新验证</button>
+            </div>
+          </section>
+
+          <p class="technical-note">删除操作仅作用于运行此 Demo 的本地 SQLite 客户记忆数据库。</p>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      (() => {
+        const queryApi = new URLSearchParams(window.location.search).get('api')
+        const API_BASE = (queryApi || 'http://127.0.0.1:8000').replace(/\/$/, '')
+
+        const recognizeButton = document.getElementById('recognize-button')
+        const recognizeAgainButton = document.getElementById('recognize-again-button')
+        const deleteButton = document.getElementById('delete-button')
+        const deleteConfirmation = document.getElementById('delete-confirmation')
+        const dangerPanel = document.getElementById('danger-panel')
+        const statusBox = document.getElementById('status')
+
+        let candidateToken = null
+        let boundSessionId = null
+        let busy = false
+
+        function setBusy(nextBusy) {
+          busy = nextBusy
+          recognizeButton.disabled = nextBusy
+          recognizeAgainButton.disabled = nextBusy
+          deleteConfirmation.disabled = nextBusy
+          deleteButton.disabled = nextBusy || !deleteConfirmation.checked || (!candidateToken && !boundSessionId)
+        }
+
+        function setStatus(kind, message) {
+          statusBox.className = `status visible ${kind}`
+          statusBox.textContent = message
+        }
+
+        function resetCandidate() {
+          candidateToken = null
+          boundSessionId = null
+          deleteConfirmation.checked = false
+          dangerPanel.classList.remove('visible')
+          deleteButton.disabled = true
+        }
+
+        async function requestJson(path, init = {}) {
+          const headers = new Headers(init.headers || {})
+          if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json; charset=utf-8')
+          const response = await fetch(`${API_BASE}${path}`, { ...init, headers })
+          const raw = await response.text()
+          let payload = null
+          if (raw) {
+            try {
+              payload = JSON.parse(raw)
+            } catch {
+              payload = { detail: raw }
+            }
+          }
+          if (!response.ok) {
+            const detail = payload?.detail || `${response.status} ${response.statusText}`
+            throw new Error(String(detail))
+          }
+          return payload
+        }
+
+        async function recognizeMyData() {
+          if (busy) return
+          resetCandidate()
+          setBusy(true)
+          setStatus('info', '正在启动摄像头并进行多帧本地人脸验证，请正对屏幕并保持不动…')
+          try {
+            await requestJson('/api/vision/start', { method: 'POST', body: '{}' }).catch(() => null)
+            const result = await requestJson('/api/identity/recognize', {
+              method: 'POST',
+              body: JSON.stringify({ provider_mode: null }),
+            })
+
+            if (result.candidate_found && result.candidate_token) {
+              candidateToken = result.candidate_token
+              dangerPanel.classList.add('visible')
+              setStatus('success', '已找到可信的本地候选记录。请阅读删除范围并完成第二次明确确认。')
+              deleteConfirmation.focus()
+              return
+            }
+
+            const friendly = {
+              no_enrolled_customers: '本机当前没有已注册的客户人脸数据，无需删除。',
+              no_face: '没有采集到足够清晰的人脸。请正对摄像头、改善光线后重试。',
+              no_match: '没有找到与当前人脸匹配的本地客户数据。',
+              unstable_match: '识别结果不够稳定。请保持正脸、不要移动，然后重新验证。',
+              unavailable: '本地人脸识别模型当前不可用。',
+            }
+            setStatus('info', friendly[result.status] || result.message || '没有找到可删除的本地客户数据。')
+          } catch (error) {
+            setStatus('error', `验证失败：${error instanceof Error ? error.message : String(error)}`)
+          } finally {
+            setBusy(false)
+          }
+        }
+
+        async function deleteMyData() {
+          if (busy || !deleteConfirmation.checked || (!candidateToken && !boundSessionId)) return
+          setBusy(true)
+          setStatus('info', '正在永久删除本地人脸特征、客户档案和历史咨询记录…')
+          try {
+            if (!boundSessionId) {
+              const session = await requestJson('/api/identity/confirm', {
+                method: 'POST',
+                body: JSON.stringify({
+                  candidate_token: candidateToken,
+                  choice: 'continue_previous',
+                  provider_mode: null,
+                }),
+              })
+              boundSessionId = session.session_id
+              candidateToken = null
+            }
+
+            const result = await requestJson('/api/identity/me', {
+              method: 'DELETE',
+              body: JSON.stringify({ session_id: boundSessionId, delete_history: true }),
+            })
+            if (!result.deleted) throw new Error(result.message || '后端没有确认删除成功。')
+
+            resetCandidate()
+            setStatus(
+              'success',
+              '您的本地数据已永久删除。系统下一次识别时会将您视为新客户，现在可以返回导购并重新演示注册流程。',
+            )
+            recognizeButton.textContent = '再次检查是否仍有我的数据'
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            if (/missing|expired|410/i.test(message)) {
+              resetCandidate()
+              setStatus('error', '本次身份确认已经超时。请重新进行人脸验证后再删除。')
+            } else {
+              setStatus('error', `删除失败：${message}。如果身份确认已成功，您可以直接再次点击删除按钮重试。`)
+            }
+          } finally {
+            setBusy(false)
+          }
+        }
+
+        deleteConfirmation.addEventListener('change', () => {
+          deleteButton.disabled = busy || !deleteConfirmation.checked || (!candidateToken && !boundSessionId)
+        })
+        recognizeButton.addEventListener('click', () => void recognizeMyData())
+        recognizeAgainButton.addEventListener('click', () => void recognizeMyData())
+        deleteButton.addEventListener('click', () => void deleteMyData())
+      })()
+    </script>
+  </body>
+</html>
