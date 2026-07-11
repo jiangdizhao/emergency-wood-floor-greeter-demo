@@ -42,7 +42,7 @@ class CustomerMemoryService:
         provider = self._provider(provider_mode)
         profile = CustomerProfile(session_id=session_id)
         self.lead_service.save_profile(profile)
-        self.context_service.reset(session_id)
+        self._set_room_question_context(session_id)
         self.runtime_service.set_provider(session_id, provider)
         self.repository.create_or_update_session(
             session_id=session_id,
@@ -101,6 +101,7 @@ class CustomerMemoryService:
             )
             greeting = self._continued_greeting(profile)
             returning_context = profile.memory_summary
+            self.context_service.reset(session_id)
         else:
             profile = self._new_project_profile(
                 latest_data=latest_data,
@@ -111,9 +112,9 @@ class CustomerMemoryService:
             )
             greeting = self._new_project_greeting(profile)
             returning_context = profile.memory_summary
+            self._set_room_question_context(session_id)
 
         self.lead_service.save_profile(profile)
-        self.context_service.reset(session_id)
         self.runtime_service.set_provider(session_id, provider)
         self.repository.create_or_update_session(
             session_id=session_id,
@@ -174,8 +175,10 @@ class CustomerMemoryService:
             summary=profile.conversation_summary,
             returning_context=profile.memory_summary,
         )
-        self.repository.append_turn(session_id=session_id, role="customer", text=user_text)
-        self.repository.append_turn(session_id=session_id, role="assistant", text=assistant_text)
+        if user_text.strip():
+            self.repository.append_turn(session_id=session_id, role="customer", text=user_text)
+        if assistant_text.strip():
+            self.repository.append_turn(session_id=session_id, role="assistant", text=assistant_text)
 
     def finish_session(self, profile: CustomerProfile) -> None:
         self.repository.finish_session(
@@ -197,6 +200,17 @@ class CustomerMemoryService:
             profile.previous_visit_summaries = []
             self.lead_service.save_profile(profile)
         return deleted
+
+    def _set_room_question_context(self, session_id: str) -> None:
+        context = self.context_service.reset(session_id)
+        self.context_service.save(
+            context.model_copy(
+                update={
+                    "pending_slot": "room_type",
+                    "last_assistant_question": "您这次主要想为哪个空间选择地板呢？",
+                }
+            )
+        )
 
     def _provider(self, requested: DialogueProvider | None) -> DialogueProvider:
         if requested is not None:
