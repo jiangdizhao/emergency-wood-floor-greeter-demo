@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 
+from .llm.providers import ProviderRegistry
 from .models import (
     ChatRequest,
     ChatResponse,
@@ -19,24 +20,26 @@ from .models import (
     GreetingRequest,
     ProductCompareResponse,
     ProductsResponse,
+    ProviderModeRequest,
+    ProviderModeResponse,
     SessionStatusResponse,
     TTSRequest,
 )
+from .services.answer_plan_service import AnswerPlanService
 from .services.chat_service import ChatService
+from .services.customer_state_service import CustomerStateService
+from .services.dialogue_orchestrator import DialogueOrchestrator
 from .services.lead_service import LeadService
 from .services.product_service import ProductService
 from .services.recommendation_service import RecommendationService
+from .services.session_runtime_service import SessionRuntimeService
 from .services.state_machine import StoreSessionStateMachine
+from .services.validation_guard import ValidationGuard
 from .vision.vision_service import VisionConfig, VisionService
 
 
 class UTF8JSONResponse(JSONResponse):
-    """JSON response class that explicitly declares UTF-8 for Windows PowerShell.
-
-    JSON is UTF-8 by default, but some Windows PowerShell versions decode
-    application/json without a charset incorrectly. The explicit charset keeps
-    Chinese product names readable in Invoke-RestMethod / Invoke-WebRequest.
-    """
+    """JSON response class that explicitly declares UTF-8 for Windows PowerShell."""
 
     media_type = "application/json; charset=utf-8"
 
@@ -51,8 +54,8 @@ class UTF8JSONResponse(JSONResponse):
 
 app = FastAPI(
     title="Emergency Wood Floor Greeter Demo API",
-    version="0.1.0",
-    description="Backend for the 2-day wood-floor retail AI greeter demo.",
+    version="0.2.0",
+    description="Wood-floor retail AI greeter with parallel Terra cloud and Qwen local dialogue modes.",
     default_response_class=UTF8JSONResponse,
 )
 
@@ -85,6 +88,23 @@ recommendation_service = RecommendationService(product_service=product_service)
 chat_service = ChatService(product_service=product_service, recommendation_service=recommendation_service)
 state_machine = StoreSessionStateMachine()
 vision_service = VisionService(state_machine=state_machine, config=VisionConfig())
+
+provider_registry = ProviderRegistry()
+runtime_service = SessionRuntimeService()
+validation_guard = ValidationGuard(product_service=product_service)
+customer_state_service = CustomerStateService()
+answer_plan_service = AnswerPlanService(product_service=product_service)
+dialogue_orchestrator = DialogueOrchestrator(
+    provider_registry=provider_registry,
+    runtime_service=runtime_service,
+    lead_service=lead_service,
+    recommendation_service=recommendation_service,
+    validation_guard=validation_guard,
+    customer_state_service=customer_state_service,
+    answer_plan_service=answer_plan_service,
+    chat_service=chat_service,
+    state_machine=state_machine,
+)
 
 
 def _local_tts_url() -> str:
@@ -183,8 +203,11 @@ def root() -> dict:
         "name": "Emergency Wood Floor Greeter Demo API",
         "status": "running",
         "docs": "/docs",
+        "dialogue_architecture": "parallel Terra cloud mode and Qwen local mode; no hidden cross-provider fallback",
         "important_endpoints": [
             "GET /api/health",
+            "GET /api/llm/status",
+            "POST /api/session/provider",
             "GET /api/products",
             "POST /api/chat",
             "POST /api/tts",
@@ -197,8 +220,6 @@ def root() -> dict:
             "POST /api/vision/stop",
             "GET /api/vision/status",
             "GET /api/vision/stream",
-            "GET /api/debug/encoding",
-            "GET /api/debug/plain-utf8",
         ],
     }
 
@@ -212,6 +233,20 @@ def health() -> dict:
         "vision_running": vision_service.get_status().get("running", False),
         "openai_tts_configured": bool(os.getenv("OPENAI_API_KEY")),
         "local_tts_available": _local_tts_available(),
+        "default_dialogue_provider": runtime_service.load("demo-session-001").provider_mode,
+    }
+
+
+@app.get("/api/llm/status")
+def llm_status(session_id: str = "demo-session-001") -> dict:
+    runtime = runtime_service.load(session_id)
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "active_provider": runtime.provider_mode,
+        "active_provider_label": runtime_service.provider_label(runtime.provider_mode),
+        "cross_provider_fallback": False,
+        "providers": provider_registry.status(),
     }
 
 
@@ -264,7 +299,6 @@ def tts(request: TTSRequest) -> Response:
         raise HTTPException(status_code=400, detail="TTS text is empty.")
 
     errors: list[str] = []
-
     if request.provider in {"local", "auto"}:
         try:
             return _call_local_tts(request, text)
@@ -307,10 +341,24 @@ def compare_products(request: CompareRequest) -> ProductCompareResponse:
 @app.get("/api/session/status", response_model=SessionStatusResponse)
 def get_session_status(session_id: str = "demo-session-001") -> SessionStatusResponse:
     profile = lead_service.load_profile(session_id=session_id)
+    runtime = runtime_service.load(session_id)
+    label = runtime_service.provider_label(runtime.provider_mode)
     return SessionStatusResponse(
         state=state_machine.state,
-        status=state_machine.to_status_dict(),
+        status={**state_machine.to_status_dict(), "provider_mode": runtime.provider_mode, "provider_label": label},
         customer_profile=profile,
+        provider_mode=runtime.provider_mode,
+        provider_label=label,
+    )
+
+
+@app.post("/api/session/provider", response_model=ProviderModeResponse)
+def set_session_provider(request: ProviderModeRequest) -> ProviderModeResponse:
+    runtime = runtime_service.set_provider(request.session_id, request.provider_mode)
+    return ProviderModeResponse(
+        session_id=runtime.session_id,
+        provider_mode=runtime.provider_mode,
+        provider_label=runtime_service.provider_label(runtime.provider_mode),
     )
 
 
@@ -318,10 +366,14 @@ def get_session_status(session_id: str = "demo-session-001") -> SessionStatusRes
 def reset_session(session_id: str = "demo-session-001") -> SessionStatusResponse:
     state_machine.reset()
     profile = lead_service.reset_profile(session_id=session_id)
+    runtime = runtime_service.load(session_id)
+    label = runtime_service.provider_label(runtime.provider_mode)
     return SessionStatusResponse(
         state=state_machine.state,
-        status=state_machine.to_status_dict(),
+        status={**state_machine.to_status_dict(), "provider_mode": runtime.provider_mode, "provider_label": label},
         customer_profile=profile,
+        provider_mode=runtime.provider_mode,
+        provider_label=label,
     )
 
 
@@ -329,10 +381,14 @@ def reset_session(session_id: str = "demo-session-001") -> SessionStatusResponse
 def handle_demo_event(request: DemoEventRequest) -> SessionStatusResponse:
     result = state_machine.handle_event(request.event)
     profile = lead_service.load_profile(session_id=request.session_id)
+    runtime = runtime_service.load(request.session_id)
+    label = runtime_service.provider_label(runtime.provider_mode)
     return SessionStatusResponse(
         state=state_machine.state,
-        status={**state_machine.to_status_dict(), **result},
+        status={**state_machine.to_status_dict(), **result, "provider_mode": runtime.provider_mode, "provider_label": label},
         customer_profile=profile,
+        provider_mode=runtime.provider_mode,
+        provider_label=label,
     )
 
 
@@ -363,54 +419,7 @@ def voice_greeting(request: GreetingRequest) -> dict:
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
-    lang = chat_service.normalize_response_language(request.text, request.response_language)
-
-    if chat_service.is_session_end(request.text):
-        state_machine.handle_event("end")
-        profile = lead_service.load_profile(session_id=request.session_id)
-        answer = (
-            "Thanks for visiting. The sales team can continue follow-up based on this requirement record."
-            if lang == "en"
-            else "好的，感谢您的咨询。稍后销售可以根据本次需求记录继续跟进。"
-        )
-        follow_up = (
-            "Sales should follow up within 24 hours to confirm area, budget, and installation schedule."
-            if lang == "en"
-            else "建议销售在 24 小时内回访，确认房间面积、预算和安装时间。"
-        )
-        return ChatResponse(
-            answer=answer,
-            recommended_products=[],
-            customer_profile=profile,
-            follow_up_suggestion=follow_up,
-            state=state_machine.state,
-        )
-
-    if state_machine.state.value not in {"CONVERSATION_ACTIVE", "INTRODUCING_PRODUCTS"}:
-        state_machine.handle_event("greeting")
-        state_machine.handle_event("intro_finished")
-
-    current_profile = lead_service.load_profile(session_id=request.session_id)
-    updated_profile = recommendation_service.extract_needs_from_text(request.text, current_profile)
-    recommended = recommendation_service.recommend(updated_profile)
-    answer = chat_service.answer_user_message(
-        user_text=request.text,
-        customer_profile=updated_profile,
-        recommended_products=recommended,
-        response_language=lang,
-    )
-    updated_profile.recommended_product_ids = [p.id for p in recommended]
-    updated_profile.conversation_summary = chat_service.build_conversation_summary(updated_profile)
-    updated_profile.follow_up_suggestion = chat_service.build_follow_up_suggestion(updated_profile)
-    saved_profile = lead_service.save_profile(updated_profile)
-
-    return ChatResponse(
-        answer=answer,
-        recommended_products=recommended,
-        customer_profile=saved_profile,
-        follow_up_suggestion=saved_profile.follow_up_suggestion,
-        state=state_machine.state,
-    )
+    return dialogue_orchestrator.handle_turn(request)
 
 
 @app.post("/api/customer/save")
