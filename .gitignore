@@ -12,6 +12,12 @@ venv/
 backend/app/data/sessions/*.json
 !backend/app/data/sessions/.gitkeep
 
+# Local biometric and customer-memory data
+backend/app/data/customer_memory.db
+backend/app/data/customer_memory.db-*
+backend/app/data/models/*.onnx
+!backend/app/data/models/.gitkeep
+
 # Node / Vite
 node_modules/
 dist/
@@ -22,5 +28,3 @@ dist/
 Thumbs.db
 .vscode/
 .idea/
-
-
