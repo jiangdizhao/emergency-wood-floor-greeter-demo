@@ -10,7 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 
+from .identity import FaceEmbedder, IdentityRepository, IdentityService
 from .llm.providers import ProviderRegistry
+from .memory import CustomerMemoryService
 from .models import (
     ChatRequest,
     ChatResponse,
@@ -18,16 +20,24 @@ from .models import (
     CustomerSaveRequest,
     DemoEventRequest,
     GreetingRequest,
+    IdentityCandidateChoiceRequest,
+    IdentityEnrollRequest,
+    IdentityForgetRequest,
+    IdentityNewSessionRequest,
+    IdentityRecognizeRequest,
+    IdentitySessionResponse,
     ProductCompareResponse,
     ProductsResponse,
     ProviderModeRequest,
     ProviderModeResponse,
+    SessionState,
     SessionStatusResponse,
     TTSRequest,
 )
 from .services.answer_plan_service import AnswerPlanService
 from .services.chat_service import ChatService
 from .services.customer_state_service import CustomerStateService
+from .services.dialogue_context_service import DialogueContextService
 from .services.dialogue_orchestrator import DialogueOrchestrator
 from .services.lead_service import LeadService
 from .services.product_service import ProductService
@@ -54,8 +64,11 @@ class UTF8JSONResponse(JSONResponse):
 
 app = FastAPI(
     title="Emergency Wood Floor Greeter Demo API",
-    version="0.2.0",
-    description="Wood-floor retail AI greeter with parallel Terra cloud and Qwen local dialogue modes.",
+    version="0.3.0",
+    description=(
+        "Wood-floor retail AI greeter with parallel Terra/Qwen dialogue modes, "
+        "local consent-based face identity and returning-customer memory."
+    ),
     default_response_class=UTF8JSONResponse,
 )
 
@@ -94,6 +107,8 @@ runtime_service = SessionRuntimeService()
 validation_guard = ValidationGuard(product_service=product_service)
 customer_state_service = CustomerStateService()
 answer_plan_service = AnswerPlanService(product_service=product_service)
+dialogue_context_service = DialogueContextService()
+
 dialogue_orchestrator = DialogueOrchestrator(
     provider_registry=provider_registry,
     runtime_service=runtime_service,
@@ -104,6 +119,17 @@ dialogue_orchestrator = DialogueOrchestrator(
     answer_plan_service=answer_plan_service,
     chat_service=chat_service,
     state_machine=state_machine,
+)
+
+identity_repository = IdentityRepository()
+face_embedder = FaceEmbedder()
+identity_service = IdentityService(repository=identity_repository, embedder=face_embedder)
+customer_memory_service = CustomerMemoryService(
+    repository=identity_repository,
+    identity_service=identity_service,
+    lead_service=lead_service,
+    runtime_service=runtime_service,
+    context_service=dialogue_context_service,
 )
 
 
@@ -192,6 +218,11 @@ def _call_openai_tts(request: TTSRequest, text: str) -> Response:
     )
 
 
+def _ensure_vision_started() -> None:
+    if not vision_service.get_status().get("running"):
+        vision_service.start()
+
+
 @app.on_event("shutdown")
 def shutdown_event() -> None:
     vision_service.stop()
@@ -204,9 +235,16 @@ def root() -> dict:
         "status": "running",
         "docs": "/docs",
         "dialogue_architecture": "parallel Terra cloud mode and Qwen local mode; no hidden cross-provider fallback",
+        "identity_architecture": "local YuNet/SFace candidate recognition with explicit confirmation before memory restore",
         "important_endpoints": [
             "GET /api/health",
             "GET /api/llm/status",
+            "GET /api/identity/status",
+            "POST /api/identity/recognize",
+            "POST /api/identity/session/new",
+            "POST /api/identity/confirm",
+            "POST /api/identity/enroll",
+            "DELETE /api/identity/me",
             "POST /api/session/provider",
             "GET /api/products",
             "POST /api/chat",
@@ -226,6 +264,7 @@ def root() -> dict:
 
 @app.get("/api/health")
 def health() -> dict:
+    identity_status = identity_service.status()
     return {
         "ok": True,
         "state": state_machine.state.value,
@@ -234,6 +273,8 @@ def health() -> dict:
         "openai_tts_configured": bool(os.getenv("OPENAI_API_KEY")),
         "local_tts_available": _local_tts_available(),
         "default_dialogue_provider": runtime_service.load("demo-session-001").provider_mode,
+        "face_identity_available": bool(identity_status.get("model", {}).get("available")),
+        "face_identity_customer_count": identity_status.get("customer_count", 0),
     }
 
 
@@ -247,6 +288,83 @@ def llm_status(session_id: str = "demo-session-001") -> dict:
         "active_provider_label": runtime_service.provider_label(runtime.provider_mode),
         "cross_provider_fallback": False,
         "providers": provider_registry.status(),
+    }
+
+
+@app.get("/api/identity/status")
+def identity_status() -> dict:
+    return {"ok": True, **identity_service.status(), "vision": vision_service.get_status()}
+
+
+@app.post("/api/identity/recognize")
+def identity_recognize(request: IdentityRecognizeRequest) -> dict:
+    _ensure_vision_started()
+    result = identity_service.recognize(vision_service.get_latest_frame)
+    result["requested_provider_mode"] = request.provider_mode
+    return result
+
+
+@app.post("/api/identity/session/new", response_model=IdentitySessionResponse)
+def identity_new_session(request: IdentityNewSessionRequest) -> IdentitySessionResponse:
+    state_machine.reset()
+    return customer_memory_service.new_anonymous_session(provider_mode=request.provider_mode)
+
+
+@app.post("/api/identity/confirm", response_model=IdentitySessionResponse)
+def identity_confirm(request: IdentityCandidateChoiceRequest) -> IdentitySessionResponse:
+    try:
+        state_machine.reset()
+        return customer_memory_service.confirm_candidate(
+            candidate_token=request.candidate_token,
+            choice=request.choice,
+            provider_mode=request.provider_mode,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=410, detail=str(exc)) from exc
+
+
+@app.post("/api/identity/enroll")
+def identity_enroll(request: IdentityEnrollRequest) -> dict:
+    _ensure_vision_started()
+    existing_profile = lead_service.load_profile(session_id=request.session_id)
+    if existing_profile.customer_id:
+        return {
+            "ok": True,
+            "status": "already_bound",
+            "enrolled": True,
+            "customer_id": existing_profile.customer_id,
+            "customer_profile": existing_profile.model_dump(),
+            "message": "当前会话已经绑定了本地客户记忆。",
+        }
+    result = identity_service.enroll(
+        frame_supplier=vision_service.get_latest_frame,
+        display_name=request.display_name,
+        consent=request.consent,
+    )
+    if result.get("enrolled") and result.get("customer_id"):
+        profile = customer_memory_service.bind_enrollment(
+            session_id=request.session_id,
+            customer_id=str(result["customer_id"]),
+            display_name=request.display_name,
+        )
+        result["customer_profile"] = profile.model_dump()
+    return {"ok": bool(result.get("enrolled")), **result}
+
+
+@app.delete("/api/identity/me")
+def identity_forget(request: IdentityForgetRequest) -> dict:
+    deleted = customer_memory_service.delete_current_customer(
+        session_id=request.session_id,
+        delete_history=request.delete_history,
+    )
+    return {
+        "ok": deleted,
+        "deleted": deleted,
+        "message": (
+            "已删除本地人脸特征和客户身份记录。"
+            if deleted
+            else "当前会话没有绑定可删除的客户身份。"
+        ),
     }
 
 
@@ -366,6 +484,7 @@ def set_session_provider(request: ProviderModeRequest) -> ProviderModeResponse:
 def reset_session(session_id: str = "demo-session-001") -> SessionStatusResponse:
     state_machine.reset()
     profile = lead_service.reset_profile(session_id=session_id)
+    dialogue_context_service.reset(session_id)
     runtime = runtime_service.load(session_id)
     label = runtime_service.provider_label(runtime.provider_mode)
     return SessionStatusResponse(
@@ -381,6 +500,8 @@ def reset_session(session_id: str = "demo-session-001") -> SessionStatusResponse
 def handle_demo_event(request: DemoEventRequest) -> SessionStatusResponse:
     result = state_machine.handle_event(request.event)
     profile = lead_service.load_profile(session_id=request.session_id)
+    if request.event == "end":
+        customer_memory_service.finish_session(profile)
     runtime = runtime_service.load(request.session_id)
     label = runtime_service.provider_label(runtime.provider_mode)
     return SessionStatusResponse(
@@ -419,7 +540,20 @@ def voice_greeting(request: GreetingRequest) -> dict:
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
-    return dialogue_orchestrator.handle_turn(request)
+    response = dialogue_orchestrator.handle_turn(request)
+    try:
+        customer_memory_service.record_turn(
+            session_id=request.session_id,
+            user_text=request.text,
+            assistant_text=response.answer,
+            profile=response.customer_profile,
+        )
+        if response.state == SessionState.SESSION_END:
+            customer_memory_service.finish_session(response.customer_profile)
+    except Exception:
+        # Customer memory must never break the customer-facing conversation path.
+        pass
+    return response
 
 
 @app.post("/api/customer/save")
@@ -429,6 +563,16 @@ def save_customer(request: CustomerSaveRequest) -> dict:
     profile.phone = request.phone or profile.phone
     profile.follow_up_status = "待联系"
     profile = lead_service.save_profile(profile)
+    if profile.customer_id:
+        runtime = runtime_service.load(request.session_id)
+        identity_repository.create_or_update_session(
+            session_id=request.session_id,
+            customer_id=profile.customer_id,
+            provider_mode=runtime.provider_mode,
+            profile=profile.model_dump(),
+            summary=profile.conversation_summary,
+            returning_context=profile.memory_summary,
+        )
     return {
         "ok": True,
         "message": "客户需求已保存到本地模拟档案。",
