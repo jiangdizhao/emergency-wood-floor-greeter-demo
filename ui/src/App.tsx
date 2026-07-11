@@ -41,6 +41,7 @@ type VoiceStatus = 'idle' | 'listening' | 'processing' | 'speaking' | 'error'
 type ScreenMode = 'welcome' | 'conversation' | 'summary'
 type ConsultantId = 'yunxi' | 'yunjian' | 'yunxia' | 'yunyang'
 type ConsultantAccessory = 'none' | 'glasses' | 'young' | 'mature'
+type IdentityPendingAction = IdentityChoice | 'retry' | null
 
 type ConsultantProfile = {
   id: ConsultantId
@@ -215,6 +216,17 @@ function buildSummary(profile: CustomerProfile, recommendedProducts: FlooringPro
   return parts.join('；') + '。'
 }
 
+function errorMessage(value: unknown): string {
+  if (!(value instanceof Error)) return String(value)
+  if (value.message.includes('410')) {
+    return '本次人脸确认已经超时。请点击“重新识别”，或选择“这不是我”开始新的匿名咨询。'
+  }
+  if (value.message.includes('Failed to fetch') || value.message.includes('NetworkError')) {
+    return '暂时无法连接后端服务。请确认 Backend 正在运行，然后重试。'
+  }
+  return value.message
+}
+
 function App() {
   const [screenMode, setScreenMode] = useState<ScreenMode>('welcome')
   const [selectedConsultantId, setSelectedConsultantId] = useState<ConsultantId>('yunxi')
@@ -236,6 +248,8 @@ function App() {
   const [identityCandidateToken, setIdentityCandidateToken] = useState<string | null>(null)
   const [identityPromptOpen, setIdentityPromptOpen] = useState(false)
   const [identityMessage, setIdentityMessage] = useState('')
+  const [identityDecisionError, setIdentityDecisionError] = useState('')
+  const [identityPendingAction, setIdentityPendingAction] = useState<IdentityPendingAction>(null)
   const [enrollmentOpen, setEnrollmentOpen] = useState(false)
   const [enrollmentName, setEnrollmentName] = useState('')
   const [enrollmentConsent, setEnrollmentConsent] = useState(false)
@@ -292,7 +306,7 @@ function App() {
       const catalog = await getProducts()
       setProducts(catalog.products)
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : String(loadError))
+      setError(errorMessage(loadError))
     }
   }
 
@@ -302,7 +316,7 @@ function App() {
     try {
       await action()
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : String(actionError))
+      setError(errorMessage(actionError))
     } finally {
       setBusyAction(null)
     }
@@ -388,7 +402,7 @@ function App() {
     if (playPreview) await speakText(consultant.previewText, consultant)
   }
 
-  async function activateSession(session: IdentitySessionResponse) {
+  function activateSession(session: IdentitySessionResponse) {
     setSessionId(session.session_id)
     setProfile(session.customer_profile)
     const savedIds = new Set(session.customer_profile.recommended_product_ids)
@@ -400,16 +414,31 @@ function App() {
     setSummaryText('')
     setMessages([createMessage('agent', session.greeting)])
     setScreenMode('conversation')
+    setIdentityPromptOpen(false)
+    setIdentityCandidateToken(null)
+    setIdentityDecisionError('')
+    setIdentityPendingAction(null)
     setIdentityMessage(session.returning_customer ? '已加载经您确认的本地历史选购记忆。' : '')
-    await sendDemoEvent('intro_started', session.session_id).catch(() => undefined)
-    await sendDemoEvent('intro_finished', session.session_id).catch(() => undefined)
-    await speakText(session.greeting)
+
+    // UI activation must not wait for event logging or TTS playback. Previously the
+    // identity modal could remain on screen with every button disabled until a long
+    // TTS fallback finished, which looked like a dead dialog.
+    void (async () => {
+      await sendDemoEvent('intro_started', session.session_id).catch(() => undefined)
+      await sendDemoEvent('intro_finished', session.session_id).catch(() => undefined)
+      await speakText(session.greeting)
+    })().catch((activationError: unknown) => {
+      console.warn('Session greeting side effect failed:', activationError)
+      setVoiceStatus('idle')
+    })
   }
 
   async function handleStartConsultation() {
     await runAction('start', async () => {
       cancelListening()
       stopSpeaking()
+      setIdentityDecisionError('')
+      setIdentityPendingAction(null)
       setIdentityMessage('正在本机检查是否存在您之前同意保存的选购记录…')
 
       let recognition: Awaited<ReturnType<typeof recognizeIdentity>> | null = null
@@ -427,19 +456,60 @@ function App() {
       }
 
       const session = await startNewIdentitySession()
-      await activateSession(session)
+      activateSession(session)
     })
   }
 
   async function handleIdentityChoice(choice: IdentityChoice) {
     const token = identityCandidateToken
-    if (!token) return
-    await runAction('identity', async () => {
+    if (!token || identityPendingAction !== null) return
+
+    setIdentityPendingAction(choice)
+    setIdentityDecisionError('')
+    setError(null)
+    try {
       const session = await confirmIdentity(token, choice)
-      setIdentityPromptOpen(false)
-      setIdentityCandidateToken(null)
-      await activateSession(session)
-    })
+      activateSession(session)
+    } catch (choiceError) {
+      console.warn('Identity confirmation failed:', choiceError)
+
+      // “This is not me” must always provide an escape route. Even if the candidate
+      // expired or confirmation storage failed, start a clean anonymous session.
+      if (choice === 'not_me') {
+        try {
+          const session = await startNewIdentitySession()
+          activateSession(session)
+          return
+        } catch (fallbackError) {
+          setIdentityDecisionError(errorMessage(fallbackError))
+        }
+      } else {
+        setIdentityDecisionError(errorMessage(choiceError))
+      }
+    } finally {
+      setIdentityPendingAction(null)
+    }
+  }
+
+  async function handleIdentityRetry() {
+    if (identityPendingAction !== null) return
+    setIdentityPendingAction('retry')
+    setIdentityDecisionError('')
+    setIdentityMessage('正在重新检查本地选购记忆…')
+    try {
+      const recognition = await recognizeIdentity()
+      if (recognition.candidate_found && recognition.candidate_token) {
+        setIdentityCandidateToken(recognition.candidate_token)
+        setIdentityMessage(recognition.message)
+        return
+      }
+      const session = await startNewIdentitySession()
+      activateSession(session)
+    } catch (retryError) {
+      setIdentityDecisionError(errorMessage(retryError))
+    } finally {
+      setIdentityPendingAction(null)
+    }
   }
 
   async function handleEnrollment() {
@@ -582,7 +652,7 @@ function App() {
       recognitionRef.current = null
       listeningSessionRef.current = false
       setVoiceStatus('error')
-      setError(recognitionError instanceof Error ? recognitionError.message : String(recognitionError))
+      setError(errorMessage(recognitionError))
     }
   }
 
@@ -690,6 +760,10 @@ function App() {
       setSummaryText('')
       setLastTranscript('')
       setCompareOpen(false)
+      setIdentityPromptOpen(false)
+      setIdentityCandidateToken(null)
+      setIdentityDecisionError('')
+      setIdentityPendingAction(null)
       setIdentityMessage('')
       setScreenMode('welcome')
     })
@@ -987,7 +1061,13 @@ function App() {
 
       {identityPromptOpen && (
         <div className="modal-backdrop identity-backdrop" role="presentation">
-          <section className="identity-modal" role="dialog" aria-modal="true" aria-label="确认历史客户记录">
+          <section
+            className="identity-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="确认历史客户记录"
+            aria-busy={identityPendingAction !== null}
+          >
             <div className="identity-symbol">
               <Sparkles size={28} />
             </div>
@@ -995,29 +1075,48 @@ function App() {
             <h2>欢迎回来</h2>
             <p>{identityMessage || '我们可能找到了您之前同意保存的选购记录。'}</p>
             <p className="identity-safety-note">确认前不会显示姓名或历史内容，避免误认造成信息泄露。</p>
+
+            {identityDecisionError && (
+              <div className="identity-decision-error" role="alert">
+                <strong>没有完成确认</strong>
+                <p>{identityDecisionError}</p>
+                <button
+                  type="button"
+                  onClick={() => void handleIdentityRetry()}
+                  disabled={identityPendingAction !== null}
+                >
+                  {identityPendingAction === 'retry' ? '正在重新识别…' : '重新识别'}
+                </button>
+              </div>
+            )}
+
+            {identityPendingAction && identityPendingAction !== 'retry' && (
+              <p className="identity-progress-note">正在准备新的咨询页面，请稍候…</p>
+            )}
+
             <div className="identity-choice-grid">
               <button
                 type="button"
                 className="primary-cta compact"
                 onClick={() => void handleIdentityChoice('continue_previous')}
-                disabled={busyAction !== null}
+                disabled={identityPendingAction !== null}
               >
-                继续上次咨询
+                {identityPendingAction === 'continue_previous' ? '正在加载上次记录…' : '继续上次咨询'}
               </button>
               <button
                 type="button"
                 onClick={() => void handleIdentityChoice('new_project')}
-                disabled={busyAction !== null}
+                disabled={identityPendingAction !== null}
               >
-                开始新的选购项目
+                {identityPendingAction === 'new_project' ? '正在创建新项目…' : '开始新的选购项目'}
               </button>
               <button
                 type="button"
                 className="quiet-button"
                 onClick={() => void handleIdentityChoice('not_me')}
-                disabled={busyAction !== null}
+                disabled={identityPendingAction !== null}
               >
-                这不是我
+                {identityPendingAction === 'not_me' ? '正在开始匿名咨询…' : '这不是我'}
               </button>
             </div>
           </section>
