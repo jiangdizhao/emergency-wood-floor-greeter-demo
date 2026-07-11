@@ -14,6 +14,7 @@ from .dialogue_context_service import DialogueContext, DialogueContextService
 from .dialogue_policy import DialoguePolicy
 from .lead_service import LeadService
 from .recommendation_service import RecommendationService
+from .sales_conversation_policy import SalesConversationPolicy
 from .session_runtime_service import SessionRuntimeService
 from .state_machine import StoreSessionStateMachine
 from .validation_guard import ValidationGuard
@@ -56,6 +57,7 @@ class DialogueOrchestrator:
         self.state_machine = state_machine
         self.context_service = DialogueContextService()
         self.dialogue_policy = DialoguePolicy()
+        self.sales_policy = SalesConversationPolicy()
 
     def handle_turn(self, request: ChatRequest) -> ChatResponse:
         provider_mode = self._resolve_provider(request.session_id, request.provider_mode)
@@ -70,12 +72,12 @@ class DialogueOrchestrator:
             answer = (
                 "Thanks for visiting. The sales team can continue follow-up based on this requirement record."
                 if lang == "en"
-                else "好的，感谢您的咨询。稍后销售可以根据本次需求记录继续跟进。"
+                else "好的，感谢您的咨询。我已经整理好本次核心需求和推荐方向，门店顾问后续可以据此继续确认面积、报价与安装安排。"
             )
             follow_up = (
                 "Sales should follow up within 24 hours to confirm area, budget, and installation schedule."
                 if lang == "en"
-                else "建议销售在 24 小时内回访，确认房间面积、预算和安装时间。"
+                else "建议销售在 24 小时内发送主推款与备选款对比，并确认房间面积、最终预算和安装时间。"
             )
             return ChatResponse(
                 answer=answer,
@@ -87,6 +89,8 @@ class DialogueOrchestrator:
                 provider_label=provider_label,
                 pending_slot=context.pending_slot,
                 last_assistant_question=context.last_assistant_question,
+                sales_stage=profile.sales_stage,
+                sales_objective=profile.sales_objective,
             )
 
         if self.state_machine.state.value not in {"CONVERSATION_ACTIVE", "INTRODUCING_PRODUCTS"}:
@@ -100,8 +104,11 @@ class DialogueOrchestrator:
         if self._is_fresh_profile(profile) and context.turn_index == 0:
             context = context.model_copy(
                 update={
-                    "pending_slot": "room_type",
-                    "last_assistant_question": "您这次主要想为哪个空间选择地板呢？",
+                    "pending_slot": "priority",
+                    "last_assistant_question": (
+                        "这次选地板，您最不愿意妥协的是哪一点："
+                        "预算、耐磨、防水、脚感、环保，还是日常好清洁？"
+                    ),
                 }
             )
 
@@ -133,6 +140,8 @@ class DialogueOrchestrator:
                 last_assistant_question=question,
                 asr_confirmation_required=True,
                 asr_suggested_text=suggested,
+                sales_stage="discovery",
+                sales_objective="澄清语音识别结果并保护已经确认的需求",
             )
 
         parse_started = time.perf_counter()
@@ -173,6 +182,12 @@ class DialogueOrchestrator:
             profile=updated_profile,
             context=context,
         )
+        sales_decision = self.sales_policy.decide(
+            validation=validation,
+            profile=updated_profile,
+            context=context,
+            dialogue_decision=decision,
+        )
 
         recommendation_started = time.perf_counter()
         recommended = self.recommendation_service.recommend(updated_profile)
@@ -184,17 +199,23 @@ class DialogueOrchestrator:
             profile=updated_profile,
             recommended_products=recommended,
             decision=decision,
+            sales_decision=sales_decision,
         )
 
         if answer_plan.must_recommend_now and not answer_plan.products:
             answer_plan = AnswerPlan(
                 response_type="clarification",
+                sales_stage="qualification",
+                sales_objective="确认可以放宽的条件，避免虚构不匹配产品",
+                next_best_action="clarify_customer_input",
+                company_highlights=answer_plan.company_highlights,
+                featured_collections=answer_plan.featured_collections,
                 customer_need_summary=answer_plan.customer_need_summary,
                 products=[],
                 constraints=answer_plan.constraints,
                 direct_message=(
-                    "我已经记录了您的条件，但当前产品库没有可安全推荐的匹配项。"
-                    "请确认是否可以放宽颜色、预算或材质限制。"
+                    "我已经记录了您的核心需求，但当前产品库没有可安全推荐的匹配项。"
+                    "为了不勉强推荐不合适的产品，请确认可以优先放宽颜色、预算还是材质限制。"
                 ),
                 next_question="您愿意优先放宽颜色、预算还是材质限制？",
             )
@@ -225,6 +246,12 @@ class DialogueOrchestrator:
 
         if answer_plan.products:
             updated_profile.recommended_product_ids = [product.product_id for product in answer_plan.products]
+        updated_profile.primary_purchase_driver = updated_profile.primary_purchase_driver or self._primary_driver(updated_profile)
+        updated_profile.sales_stage = answer_plan.sales_stage
+        updated_profile.sales_objective = answer_plan.sales_objective
+        updated_profile.featured_collection_ids = [
+            collection.collection_id for collection in answer_plan.featured_collections
+        ]
         updated_profile.conversation_summary = self.customer_state_service.build_summary(updated_profile)
         updated_profile.follow_up_suggestion = self.customer_state_service.build_follow_up(updated_profile)
         saved_profile = self.lead_service.save_profile(updated_profile)
@@ -246,7 +273,7 @@ class DialogueOrchestrator:
         logger.info(
             "dialogue_turn provider=%s session=%s parse_ms=%.1f validation_ms=%.1f "
             "recommendation_ms=%.1f render_ms=%.1f guard_ok=%s can_apply=%s "
-            "decision=%s degraded=%s intent=%s pending_slot=%s",
+            "decision=%s sales_stage=%s next_best_action=%s degraded=%s intent=%s pending_slot=%s",
             provider_mode,
             request.session_id,
             parse_ms,
@@ -256,6 +283,8 @@ class DialogueOrchestrator:
             validation.ok,
             validation.can_apply,
             decision.action,
+            answer_plan.sales_stage,
+            answer_plan.next_best_action,
             degraded,
             validation.semantic_turn.intent,
             context.pending_slot,
@@ -279,6 +308,9 @@ class DialogueOrchestrator:
             needs_clarification=decision.action == "clarify",
             pending_slot=context.pending_slot,
             last_assistant_question=context.last_assistant_question,
+            sales_stage=answer_plan.sales_stage,
+            sales_objective=answer_plan.sales_objective,
+            featured_collections=[collection.model_dump() for collection in answer_plan.featured_collections],
         )
 
     def _resolve_provider(self, session_id: str, requested: DialogueProvider | None) -> DialogueProvider:
@@ -307,6 +339,8 @@ class DialogueOrchestrator:
             needs_clarification=False,
             pending_slot=context.pending_slot,
             last_assistant_question=context.last_assistant_question,
+            sales_stage=plan.sales_stage,
+            sales_objective=plan.sales_objective,
         )
 
     def _asr_confirmation(
@@ -359,6 +393,7 @@ class DialogueOrchestrator:
             "preferred_color": {"钱", "浅", "灰", "原", "深"},
             "budget": {"中", "高", "低", "钱"},
             "style": {"现代", "原木"},
+            "priority": {"水", "磨", "钱", "脚", "清洁"},
         }
         return text in ambiguous.get(pending_slot, set())
 
@@ -392,7 +427,9 @@ class DialogueOrchestrator:
     def _slot_from_question(question: str | None):
         if not question:
             return None
-        if "房间" in question or "客厅" in question:
+        if "最不愿意妥协" in question or "最重视" in question or "核心需求" in question:
+            return "priority"
+        if "房间" in question or "客厅" in question or "铺在" in question:
             return "room_type"
         if "预算" in question or "经济" in question:
             return "budget"
@@ -400,9 +437,14 @@ class DialogueOrchestrator:
             return "style"
         if "颜色" in question or "浅灰" in question:
             return "preferred_color"
-        if "重视" in question or "防水" in question:
-            return "priority"
         return None
+
+    @staticmethod
+    def _primary_driver(profile: CustomerProfile) -> str | None:
+        if not profile.priorities:
+            return None
+        rank = {"high": 3, "medium": 2, "low": 1}
+        return max(profile.priorities.items(), key=lambda item: rank.get(item[1], 0))[0]
 
     @staticmethod
     def _is_fresh_profile(profile: CustomerProfile) -> bool:
