@@ -70,12 +70,17 @@ class CustomerMemoryService:
         choice: IdentityChoice,
         provider_mode: DialogueProvider | None = None,
     ) -> IdentitySessionResponse:
-        accepted = choice != "not_me"
-        candidate = self.identity_service.consume_candidate(candidate_token, accepted=accepted)
+        # Read first and consume only after the new session is fully prepared. The
+        # previous implementation popped the token before file/database work, so a
+        # transient error left the confirmation dialog permanently unrecoverable.
+        candidate = self.identity_service.get_candidate(candidate_token)
         if candidate is None:
             raise ValueError("Identity candidate is missing or expired. Please recognize again.")
+
         if choice == "not_me":
-            return self.new_anonymous_session(provider_mode=provider_mode)
+            response = self.new_anonymous_session(provider_mode=provider_mode)
+            self.identity_service.finalize_candidate(candidate_token, accepted=False)
+            return response
 
         customer = self.repository.get_customer(candidate.customer_id)
         if customer is None:
@@ -124,6 +129,7 @@ class CustomerMemoryService:
             returning_context=returning_context,
         )
         self.repository.mark_seen(candidate.customer_id)
+        self.identity_service.finalize_candidate(candidate_token, accepted=True)
         return IdentitySessionResponse(
             session_id=session_id,
             customer_profile=profile,
