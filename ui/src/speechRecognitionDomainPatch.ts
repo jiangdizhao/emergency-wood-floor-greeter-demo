@@ -16,6 +16,27 @@ type NativeEvent = {
   }
 }
 
+type RecognitionErrorEvent = {
+  error: string
+  message?: string
+}
+
+type NativeRecognition = {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  maxAlternatives: number
+  start: () => void
+  stop: () => void
+  abort: () => void
+  onstart: (() => void) | null
+  onend: (() => void) | null
+  onerror: ((event: RecognitionErrorEvent) => void) | null
+  onresult: ((event: NativeEvent) => void) | null
+}
+
+type NativeRecognitionConstructor = new () => NativeRecognition
+
 const DOMAIN_TERMS = [
   '浅灰色',
   '浅灰',
@@ -64,44 +85,37 @@ function candidateScore(candidate: NativeAlternative): number {
   return score
 }
 
-function rankResult(result: NativeResult): NativeResult {
-  const alternatives = Array.from({ length: result.length }, (_, index) => result[index]).filter(Boolean)
-  alternatives.sort((left, right) => candidateScore(right) - candidateScore(left))
-
-  return new Proxy(result, {
-    get(target, property, receiver) {
-      if (property === 'length') return alternatives.length
-      if (typeof property === 'string' && /^\d+$/.test(property)) {
-        return alternatives[Number(property)]
-      }
-      return Reflect.get(target, property, receiver)
-    },
-  })
-}
-
+/**
+ * Convert the browser's native SpeechRecognitionEvent into a small plain
+ * JavaScript snapshot before reordering alternatives. Native Web Speech
+ * objects are host objects and must not be wrapped in Proxy: Chrome can lose
+ * event delivery or throw an "Illegal invocation" when native accessors or
+ * methods receive a Proxy as `this`.
+ */
 function rankEvent(event: NativeEvent): NativeEvent {
-  const results = new Proxy(event.results, {
-    get(target, property, receiver) {
-      if (typeof property === 'string' && /^\d+$/.test(property)) {
-        const result = Reflect.get(target, property, receiver) as NativeResult
-        return result ? rankResult(result) : result
-      }
-      return Reflect.get(target, property, receiver)
-    },
-  })
+  const rankedResults: NativeResult[] = []
 
-  return new Proxy(event, {
-    get(target, property, receiver) {
-      if (property === 'results') return results
-      return Reflect.get(target, property, receiver)
-    },
-  })
+  for (let resultIndex = 0; resultIndex < event.results.length; resultIndex += 1) {
+    const nativeResult = event.results[resultIndex]
+    const alternatives = Array.from(
+      { length: nativeResult.length },
+      (_, alternativeIndex) => nativeResult[alternativeIndex],
+    )
+      .filter(Boolean)
+      .sort((left, right) => candidateScore(right) - candidateScore(left))
+
+    const snapshot = alternatives as NativeResult
+    snapshot.isFinal = nativeResult.isFinal
+    rankedResults.push(snapshot)
+  }
+
+  return { results: rankedResults }
 }
 
 function installDomainRecognitionPatch() {
   const speechWindow = window as Window & {
-    SpeechRecognition?: new () => Record<string, unknown>
-    webkitSpeechRecognition?: new () => Record<string, unknown>
+    SpeechRecognition?: NativeRecognitionConstructor
+    webkitSpeechRecognition?: NativeRecognitionConstructor
     __flooringSpeechPatchInstalled?: boolean
   }
 
@@ -109,28 +123,102 @@ function installDomainRecognitionPatch() {
   const Original = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition
   if (!Original) return
 
-  const Wrapped = new Proxy(Original, {
-    construct(target, args, newTarget) {
-      const nativeRecognition = Reflect.construct(target, args, newTarget) as Record<string, unknown>
-      const proxy = new Proxy(nativeRecognition, {
-        set(instance, property, value, receiver) {
-          if (property === 'maxAlternatives') {
-            return Reflect.set(instance, property, Math.max(3, Number(value) || 1), receiver)
-          }
-          if (property === 'onresult' && typeof value === 'function') {
-            const wrappedHandler = (event: NativeEvent) => value(rankEvent(event))
-            return Reflect.set(instance, property, wrappedHandler, receiver)
-          }
-          return Reflect.set(instance, property, value, receiver)
-        },
-      })
-      Reflect.set(nativeRecognition, 'maxAlternatives', 3)
-      return proxy
-    },
-  })
+  /**
+   * A small facade is used instead of Proxying the native recognition object.
+   * All native methods are called on the real browser object, preserving the
+   * required Web Speech API receiver while still allowing domain ranking.
+   */
+  class DomainRecognition implements NativeRecognition {
+    private readonly nativeRecognition: NativeRecognition
+    private resultHandler: ((event: NativeEvent) => void) | null = null
 
-  speechWindow.SpeechRecognition = Wrapped
-  speechWindow.webkitSpeechRecognition = Wrapped
+    constructor() {
+      this.nativeRecognition = new Original()
+      this.nativeRecognition.maxAlternatives = 3
+    }
+
+    get lang() {
+      return this.nativeRecognition.lang
+    }
+
+    set lang(value: string) {
+      this.nativeRecognition.lang = value
+    }
+
+    get continuous() {
+      return this.nativeRecognition.continuous
+    }
+
+    set continuous(value: boolean) {
+      this.nativeRecognition.continuous = value
+    }
+
+    get interimResults() {
+      return this.nativeRecognition.interimResults
+    }
+
+    set interimResults(value: boolean) {
+      this.nativeRecognition.interimResults = value
+    }
+
+    get maxAlternatives() {
+      return this.nativeRecognition.maxAlternatives
+    }
+
+    set maxAlternatives(value: number) {
+      this.nativeRecognition.maxAlternatives = Math.max(3, Number(value) || 1)
+    }
+
+    get onstart() {
+      return this.nativeRecognition.onstart
+    }
+
+    set onstart(value: (() => void) | null) {
+      this.nativeRecognition.onstart = value
+    }
+
+    get onend() {
+      return this.nativeRecognition.onend
+    }
+
+    set onend(value: (() => void) | null) {
+      this.nativeRecognition.onend = value
+    }
+
+    get onerror() {
+      return this.nativeRecognition.onerror
+    }
+
+    set onerror(value: ((event: RecognitionErrorEvent) => void) | null) {
+      this.nativeRecognition.onerror = value
+    }
+
+    get onresult() {
+      return this.resultHandler
+    }
+
+    set onresult(value: ((event: NativeEvent) => void) | null) {
+      this.resultHandler = value
+      this.nativeRecognition.onresult = value
+        ? (event: NativeEvent) => value(rankEvent(event))
+        : null
+    }
+
+    start() {
+      this.nativeRecognition.start()
+    }
+
+    stop() {
+      this.nativeRecognition.stop()
+    }
+
+    abort() {
+      this.nativeRecognition.abort()
+    }
+  }
+
+  speechWindow.SpeechRecognition = DomainRecognition
+  speechWindow.webkitSpeechRecognition = DomainRecognition
   speechWindow.__flooringSpeechPatchInstalled = true
 }
 
