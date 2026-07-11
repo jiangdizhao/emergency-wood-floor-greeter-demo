@@ -57,10 +57,15 @@ class CustomerProfile(BaseModel):
     has_elderly: bool | None = None
     humid_environment: bool | None = None
     priorities: dict[str, str] = Field(default_factory=dict)
+    primary_purchase_driver: str | None = None
     preferred_colors: list[str] = Field(default_factory=list)
     rejected_colors: list[str] = Field(default_factory=list)
     preferred_product_ids: list[str] = Field(default_factory=list)
     rejected_product_ids: list[str] = Field(default_factory=list)
+
+    sales_stage: str = "introduction"
+    sales_objective: str = "建立专业可信度并确认客户最重要的购买驱动"
+    featured_collection_ids: list[str] = Field(default_factory=list)
 
     # Kept for backward compatibility with the current UI and deterministic scorer.
     special_needs: list[str] = Field(default_factory=list)
@@ -116,6 +121,9 @@ class ChatResponse(BaseModel):
     last_assistant_question: str | None = None
     asr_confirmation_required: bool = False
     asr_suggested_text: str | None = None
+    sales_stage: str = "discovery"
+    sales_objective: str = "确认客户需求"
+    featured_collections: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class TTSRequest(BaseModel):
