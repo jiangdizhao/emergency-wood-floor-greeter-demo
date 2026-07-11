@@ -5,12 +5,14 @@ Customer-facing wood-floor retail AI assistant demo.
 Current product flow:
 
 - customer presses one clear **开始咨询** button
+- the assistant checks local, consented face-memory records before creating a new conversation session
+- a possible returning-customer match is never trusted automatically; the customer must choose **继续上次咨询 / 开始新的选购项目 / 这不是我**
 - the assistant greets the customer, introduces itself, and asks the first needs-discovery question
 - Chinese is the default and only customer-facing conversation language for this phase
 - browser Web Speech API provides push-to-talk speech recognition
 - local Kokoro is the primary TTS provider, with OpenAI and browser SpeechSynthesis fallbacks
 - deterministic product recommendation, comparison, customer profile extraction, and session summary remain available
-- the OpenCV + MediaPipe camera service can run silently in the backend, but no camera image or engineering telemetry is shown to customers
+- the OpenCV + MediaPipe camera service runs silently in the backend; no camera image or engineering telemetry is shown to customers
 - the customer UI uses a warm retail layout, an animated virtual consultant, and only a few primary actions
 
 ## Backend quick start
@@ -37,7 +39,75 @@ Useful backend URLs:
 - Health: http://127.0.0.1:8000/api/health
 - Docs: http://127.0.0.1:8000/docs
 - Vision status: http://127.0.0.1:8000/api/vision/status
+- Face identity status: http://127.0.0.1:8000/api/identity/status
 - TTS status: http://127.0.0.1:8000/api/tts/status
+
+## Local face identity MVP
+
+The MVP uses OpenCV YuNet for five-landmark face detection and OpenCV SFace for aligned face embeddings. It does not open a second camera. `VisionService` remains the only camera owner and exposes defensive copies of its latest clean frame to the identity service.
+
+Download the two official OpenCV Zoo models once:
+
+```powershell
+cd F:\emergency-wood-floor-greeter-demo\backend
+powershell -ExecutionPolicy Bypass -File .\scripts\download_face_models.ps1
+```
+
+The files are stored locally and ignored by Git:
+
+```text
+backend/app/data/models/face_detection_yunet_2023mar.onnx
+backend/app/data/models/face_recognition_sface_2021dec.onnx
+```
+
+Restart the backend and verify:
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/identity/status" -Method Get |
+  ConvertTo-Json -Depth 20
+```
+
+Expected model status:
+
+```text
+model.available = true
+stores_raw_photos = false
+requires_confirmation = true
+```
+
+Local biometric and memory data are written to:
+
+```text
+backend/app/data/customer_memory.db
+```
+
+This database and its WAL files are ignored by Git.
+
+### Privacy and safety behavior
+
+- Face enrollment requires an explicit checkbox and button action from the customer.
+- Raw camera frames and aligned face crops are processed in memory and are not stored.
+- The database stores normalized float32 face embeddings, customer profiles, compact summaries, and conversation turns.
+- Recognition uses multiple frames, a similarity threshold, a top-1/top-2 margin, and voting.
+- A match only creates a short-lived candidate token. No history is loaded until the customer confirms it.
+- Before confirmation, the UI never displays a customer name or prior consultation content.
+- Choosing **这不是我** discards the candidate and starts an anonymous session.
+- Every visit gets a fresh `session_id`; `customer_id` and `session_id` are separate.
+- **开始新的选购项目** retains only stable household background, not the prior room, budget, style, color, or recommendation.
+- This MVP is for low-risk consultation continuity, not payment, access control, or legal identity verification.
+
+Optional threshold settings:
+
+```powershell
+$env:FACE_ACCEPT_THRESHOLD="0.45"
+$env:FACE_DUPLICATE_THRESHOLD="0.50"
+$env:FACE_MARGIN_THRESHOLD="0.04"
+$env:FACE_RECOGNITION_SAMPLES="8"
+$env:FACE_MIN_VOTES="3"
+$env:FACE_ENROLLMENT_SAMPLES="10"
+```
+
+The defaults intentionally favor false rejection over loading the wrong customer's history. Tune them only with same-camera, same-lighting local tests.
 
 ## Local Kokoro TTS quick start
 
@@ -70,12 +140,6 @@ conda activate woodfloor
 $env:LOCAL_TTS_URL="http://127.0.0.1:8010/tts"
 $env:LOCAL_TTS_HEALTH_URL="http://127.0.0.1:8010/health"
 uvicorn app.main:app --reload --port 8000
-```
-
-Check the main backend TTS status:
-
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/tts/status" -Method Get | ConvertTo-Json -Depth 10
 ```
 
 ## OpenAI TTS fallback
@@ -111,33 +175,35 @@ $env:VITE_API_BASE_URL="http://127.0.0.1:8000"
 npm run dev -- --host 127.0.0.1
 ```
 
+## Face-memory test flow
+
+1. Start the camera, backend, frontend, and both dialogue/TTS services as usual.
+2. For the first visit, click **开始咨询**. With no enrolled customers, the app creates a fresh anonymous session.
+3. Complete enough conversation to reach **结束并总结**.
+4. Click **同意并保存本地记忆**, read the consent, keep the face centered, and start capture.
+5. Return to the welcome screen and start another consultation while the same person faces the camera.
+6. The UI should show a generic **欢迎回来** confirmation without exposing prior details.
+7. Choose **继续上次咨询** to load the previous project, or **开始新的选购项目** to keep only stable household facts.
+8. Test a different person. The system should prefer starting a new anonymous session instead of loading the prior history.
+
 ## Current customer UI
 
-The first screen contains only the virtual consultant, a short explanation, and **开始咨询**.
+The first screen contains the virtual consultant, a short explanation, and **开始咨询**.
 
 After the customer starts:
 
-1. The assistant immediately speaks a fixed Chinese greeting and introduction.
-2. The customer can press **点击说话** or type a request.
-3. Product recommendations appear inside the conversation.
-4. **产品对比** opens a focused comparison dialog without exposing engineering controls.
-5. **结束并总结** generates a structured consultation summary from the captured customer profile.
-6. **重新开始** resets the demo for the next visitor.
-
-The camera is started silently by the frontend so the backend remains ready for the future returning-customer recognition feature. The customer interface does not request or display the MJPEG stream, face boxes, distance, stable-close state, wave state, FPS, backend URL, TTS provider, or model diagnostics.
+1. The backend performs a local returning-customer candidate check.
+2. The customer confirms or rejects any candidate before history is restored.
+3. The assistant speaks the appropriate new-customer or returning-customer greeting.
+4. The customer can press **点击说话** or type a request.
+5. Product recommendations appear inside the conversation.
+6. **产品对比** opens a focused comparison dialog without exposing engineering controls.
+7. **结束并总结** generates a structured consultation summary and offers optional local face-memory enrollment.
+8. **重新开始** ends the current visit and returns to the recognition-aware welcome flow.
 
 ## Voice interaction
 
 Use Chrome or Edge for the most reliable Web Speech API support.
-
-Recommended test flow:
-
-1. Click **开始咨询**.
-2. Confirm that Kokoro plays the Chinese greeting.
-3. Click **点击说话** and say one of the sample questions below.
-4. Confirm that the response appears in Chinese and is spoken by Kokoro.
-5. Open **产品对比**, select two products, and inspect the comparison table.
-6. Click **结束并总结** and inspect the structured summary.
 
 Chinese test questions:
 
@@ -153,7 +219,7 @@ Important behavior:
 - TTS `auto` mode tries local Kokoro first, then OpenAI, then browser SpeechSynthesis.
 - TTS playback stops before speech recognition starts, reducing self-listening feedback.
 - Voice interaction remains push-to-talk; real-time barge-in is not implemented.
-- Camera or vision failure is intentionally hidden from the customer-facing page and does not block button-led consultation.
+- Camera or identity failure does not block consultation; the app starts an anonymous session.
 
 ## More docs
 
