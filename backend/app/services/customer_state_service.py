@@ -38,12 +38,15 @@ class CustomerStateService:
                     self._append_unique(updated.rejected_product_ids, product_id)
                     self._remove(updated.preferred_product_ids, product_id)
 
+        updated.primary_purchase_driver = self._primary_driver(updated)
         self._sync_legacy_fields(updated)
         return updated
 
     @staticmethod
     def build_summary(profile: CustomerProfile) -> str:
         parts: list[str] = []
+        if profile.primary_purchase_driver:
+            parts.append(f"首要购买驱动：{profile.primary_purchase_driver}")
         if profile.room_type:
             parts.append(f"使用空间：{profile.room_type}")
         if profile.style:
@@ -72,6 +75,8 @@ class CustomerStateService:
     @staticmethod
     def build_follow_up(profile: CustomerProfile) -> str:
         missing: list[str] = []
+        if not profile.primary_purchase_driver:
+            missing.append("最重要的购买需求")
         if not profile.room_type:
             missing.append("铺装空间")
         if not profile.budget:
@@ -94,6 +99,13 @@ class CustomerStateService:
             setattr(profile, name, value == "yes")
         elif name in {"room_type", "style", "budget"}:
             setattr(profile, name, value)
+
+    @staticmethod
+    def _primary_driver(profile: CustomerProfile) -> str | None:
+        if not profile.priorities:
+            return None
+        rank = {"high": 3, "medium": 2, "low": 1}
+        return max(profile.priorities.items(), key=lambda item: rank.get(item[1], 0))[0]
 
     @staticmethod
     def _sync_legacy_fields(profile: CustomerProfile) -> None:
