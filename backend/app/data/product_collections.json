@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "simulated": true,
+  "collections": [
+    {
+      "collection_id": "easycare_family",
+      "name": "耐磨易维护家庭系列",
+      "tagline": "面向宠物、儿童和高频使用空间，优先兼顾耐磨与日常清洁",
+      "best_for": ["宠物家庭", "儿童家庭", "客厅", "高频使用区域", "好清洁优先"],
+      "strengths": ["耐磨等级较高", "日常维护相对简单", "适合高频活动空间"],
+      "tradeoffs": ["脚感与天然木质感通常不如实木类产品温润"],
+      "product_ids": ["WF-SPC-001", "WF-SPC-004", "WF-LAM-003", "WF-LAM-006"]
+    },
+    {
+      "collection_id": "floor_heating_ready",
+      "name": "地暖适配系列",
+      "tagline": "从稳定性、材质路线和家庭使用条件出发筛选地暖适配产品",
+      "best_for": ["地暖住宅", "全屋铺装", "冬季采暖家庭"],
+      "strengths": ["当前代表产品均标记为支持地暖", "可在预算、脚感和维护需求之间进一步比较"],
+      "tradeoffs": ["最终铺装仍需确认地暖系统、基层条件和安装要求"],
+      "product_ids": ["WF-SPC-001", "WF-WOOD-002", "WF-LAM-003", "WF-SPC-004", "WF-WOOD-005", "WF-LAM-006"]
+    },
+    {
+      "collection_id": "natural_wood_comfort",
+      "name": "高品质实木质感系列",
+      "tagline": "面向重视脚感、真实木纹和空间温度感的自住家庭",
+      "best_for": ["高品质自住", "卧室", "书房", "脚感优先", "自然风格"],
+      "strengths": ["真实木质纹理", "脚感更自然", "空间氛围温暖"],
+      "tradeoffs": ["预算通常更高", "防潮和日常维护要求高于 SPC 与强化类产品"],
+      "product_ids": ["WF-WOOD-002", "WF-WOOD-005"]
+    },
+    {
+      "collection_id": "value_practical",
+      "name": "经济实用系列",
+      "tagline": "在有限预算下优先兼顾耐磨、视觉效果和安装维护便利性",
+      "best_for": ["预算敏感", "出租房", "局部翻新", "经济预算"],
+      "strengths": ["性价比突出", "安装维护方便", "风格选择清晰"],
+      "tradeoffs": ["部分产品不适合作为高防水场景的首选"],
+      "product_ids": ["WF-LAM-003", "WF-LAM-006"]
+    },
+    {
+      "collection_id": "modern_design",
+      "name": "现代空间设计系列",
+      "tagline": "以浅灰、灰调、奶油白和深胡桃等方向服务现代简约、轻奢和新中式空间",
+      "best_for": ["现代简约", "轻奢", "新中式", "客厅", "全屋视觉统一"],
+      "strengths": ["颜色方向明确", "便于与现代家具和整体软装搭配"],
+      "tradeoffs": ["最终颜色应结合门店样板、采光和墙面家具共同确认"],
+      "product_ids": ["WF-SPC-001", "WF-LAM-003", "WF-SPC-004", "WF-LAM-006"]
+    }
+  ]
+}
