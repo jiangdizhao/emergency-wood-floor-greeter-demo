@@ -12,6 +12,8 @@ export type SessionState =
 
 export type ResponseLanguage = 'zh' | 'en'
 export type TTSProvider = 'auto' | 'local' | 'openai' | 'browser'
+export type DialogueProvider = 'terra' | 'qwen'
+export type IdentityChoice = 'continue_previous' | 'new_project' | 'not_me'
 
 export type FlooringProduct = {
   id: string
@@ -32,11 +34,26 @@ export type FlooringProduct = {
 
 export type CustomerProfile = {
   session_id: string
+  customer_id?: string | null
+  is_returning_customer?: boolean
+  memory_summary?: string
+  previous_visit_summaries?: string[]
+  last_seen_at?: string | null
   customer_name: string | null
   phone: string | null
   room_type: string | null
   style: string | null
   budget: string | null
+  has_pets?: boolean | null
+  has_floor_heating?: boolean | null
+  has_children?: boolean | null
+  has_elderly?: boolean | null
+  humid_environment?: boolean | null
+  priorities?: Record<string, string>
+  preferred_colors?: string[]
+  rejected_colors?: string[]
+  preferred_product_ids?: string[]
+  rejected_product_ids?: string[]
   special_needs: string[]
   concerns: string[]
   recommended_product_ids: string[]
@@ -65,6 +82,7 @@ export type VisionStatus = {
   state: SessionState
   error: string | null
   fps_estimate: number
+  identity_frame_available?: boolean
   wave_debug: Record<string, unknown>
 }
 
@@ -74,12 +92,58 @@ export type ChatResponse = {
   customer_profile: CustomerProfile
   follow_up_suggestion: string
   state: SessionState
+  provider_mode?: DialogueProvider
+  provider_label?: string
+  llm_degraded?: boolean
+  needs_clarification?: boolean
+  pending_slot?: string | null
+  last_assistant_question?: string | null
+  asr_confirmation_required?: boolean
+  asr_suggested_text?: string | null
 }
 
 export type SessionStatusResponse = {
   state: SessionState
   status: Record<string, unknown>
   customer_profile: CustomerProfile
+  provider_mode?: DialogueProvider
+  provider_label?: string
+}
+
+export type IdentityRecognitionResult = {
+  status: string
+  candidate_found: boolean
+  candidate_token?: string
+  expires_in_seconds?: number
+  requires_confirmation?: boolean
+  confidence_band?: string
+  valid_samples?: number
+  message: string
+  error?: string | null
+}
+
+export type IdentitySessionResponse = {
+  ok: boolean
+  session_id: string
+  customer_profile: CustomerProfile
+  returning_customer: boolean
+  greeting: string
+  provider_mode: DialogueProvider
+  provider_label: string
+  memory_loaded: boolean
+}
+
+export type IdentityEnrollResult = {
+  ok: boolean
+  status: string
+  enrolled: boolean
+  customer_id?: string
+  template_count?: number
+  valid_samples?: number
+  stores_raw_photos?: boolean
+  message: string
+  error?: string | null
+  customer_profile?: CustomerProfile
 }
 
 export type CompareRow = {
@@ -140,22 +204,22 @@ export function getProducts(): Promise<{ products: FlooringProduct[] }> {
   return requestJson('/api/products')
 }
 
-export function getSessionStatus(): Promise<SessionStatusResponse> {
-  return requestJson('/api/session/status')
+export function getSessionStatus(sessionId = 'demo-session-001'): Promise<SessionStatusResponse> {
+  return requestJson(`/api/session/status?session_id=${encodeURIComponent(sessionId)}`)
 }
 
-export function resetSession(): Promise<SessionStatusResponse> {
-  return requestJson('/api/session/reset', { method: 'POST' })
+export function resetSession(sessionId = 'demo-session-001'): Promise<SessionStatusResponse> {
+  return requestJson(`/api/session/reset?session_id=${encodeURIComponent(sessionId)}`, { method: 'POST' })
 }
 
-export function sendDemoEvent(event: string): Promise<SessionStatusResponse> {
+export function sendDemoEvent(event: string, sessionId = 'demo-session-001'): Promise<SessionStatusResponse> {
   return requestJson('/api/demo/event', {
     method: 'POST',
-    body: JSON.stringify({ event }),
+    body: JSON.stringify({ event, session_id: sessionId }),
   })
 }
 
-export function sendVoiceGreeting(text = '你好'): Promise<{
+export function sendVoiceGreeting(text = '你好', sessionId = 'demo-session-001'): Promise<{
   accepted: boolean
   state: SessionState
   message: string
@@ -163,14 +227,77 @@ export function sendVoiceGreeting(text = '你好'): Promise<{
 }> {
   return requestJson('/api/greeting/voice', {
     method: 'POST',
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, session_id: sessionId }),
   })
 }
 
-export function sendChat(text: string, responseLanguage?: ResponseLanguage): Promise<ChatResponse> {
+export function sendChat(
+  text: string,
+  responseLanguage?: ResponseLanguage,
+  sessionId = 'demo-session-001',
+): Promise<ChatResponse> {
   return requestJson('/api/chat', {
     method: 'POST',
-    body: JSON.stringify({ text, response_language: responseLanguage }),
+    body: JSON.stringify({ text, response_language: responseLanguage, session_id: sessionId }),
+  })
+}
+
+export function getIdentityStatus(): Promise<Record<string, unknown>> {
+  return requestJson('/api/identity/status')
+}
+
+export function recognizeIdentity(providerMode?: DialogueProvider): Promise<IdentityRecognitionResult> {
+  return requestJson('/api/identity/recognize', {
+    method: 'POST',
+    body: JSON.stringify({ provider_mode: providerMode ?? null }),
+  })
+}
+
+export function startNewIdentitySession(providerMode?: DialogueProvider): Promise<IdentitySessionResponse> {
+  return requestJson('/api/identity/session/new', {
+    method: 'POST',
+    body: JSON.stringify({ provider_mode: providerMode ?? null }),
+  })
+}
+
+export function confirmIdentity(
+  candidateToken: string,
+  choice: IdentityChoice,
+  providerMode?: DialogueProvider,
+): Promise<IdentitySessionResponse> {
+  return requestJson('/api/identity/confirm', {
+    method: 'POST',
+    body: JSON.stringify({
+      candidate_token: candidateToken,
+      choice,
+      provider_mode: providerMode ?? null,
+    }),
+  })
+}
+
+export function enrollIdentity(
+  sessionId: string,
+  consent: boolean,
+  displayName?: string,
+): Promise<IdentityEnrollResult> {
+  return requestJson('/api/identity/enroll', {
+    method: 'POST',
+    body: JSON.stringify({
+      session_id: sessionId,
+      consent,
+      display_name: displayName?.trim() || null,
+    }),
+  })
+}
+
+export function forgetIdentity(sessionId: string, deleteHistory = true): Promise<{
+  ok: boolean
+  deleted: boolean
+  message: string
+}> {
+  return requestJson('/api/identity/me', {
+    method: 'DELETE',
+    body: JSON.stringify({ session_id: sessionId, delete_history: deleteHistory }),
   })
 }
 
