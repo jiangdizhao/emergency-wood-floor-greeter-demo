@@ -81,6 +81,9 @@ class VisionService:
 
     The backend owns the camera. The frontend should display `/api/vision/stream`
     and poll `/api/vision/status`; it should not open the camera directly.
+
+    Face identity never opens a second VideoCapture. It reads defensive copies of
+    the most recent clean BGR frame through get_latest_frame().
     """
 
     def __init__(self, state_machine: StoreSessionStateMachine, config: VisionConfig | None = None) -> None:
@@ -94,6 +97,7 @@ class VisionService:
         self._thread: threading.Thread | None = None
         self._cap: cv2.VideoCapture | None = None
         self._latest_jpeg: bytes = self._make_placeholder_frame("Vision service is stopped")
+        self._latest_identity_frame: np.ndarray | None = None
         self._status = VisionStatus(state=self.state_machine.state.value)
         self._last_accepted_wave_at: float | None = None
         self._last_accepted_wave_event: str | None = None
@@ -108,6 +112,7 @@ class VisionService:
             self._stop_event.clear()
             self.face_estimator.reset()
             self.wave_detector.reset()
+            self._latest_identity_frame = None
             self._last_accepted_wave_at = None
             self._last_accepted_wave_event = None
             self._last_raw_wave_event = None
@@ -126,6 +131,7 @@ class VisionService:
             thread.join(timeout=2.0)
         with self._lock:
             self._release_camera_locked()
+            self._latest_identity_frame = None
             self._status.running = False
             self._status.camera_opened = False
             self._status.greeting_recent = False
@@ -138,9 +144,21 @@ class VisionService:
         now = time.time()
         with self._lock:
             status = self._status.to_dict()
+            status["identity_frame_available"] = self._latest_identity_frame is not None
         status["state"] = self.state_machine.state.value
         status["greeting_recent"] = self._is_recent_greeting(now)
         return status
+
+    def get_latest_frame(self) -> np.ndarray | None:
+        """Return a copy of the latest clean mirrored camera frame.
+
+        The copy prevents YuNet/SFace from racing with the vision loop or drawing
+        overlays into the shared frame.
+        """
+        with self._lock:
+            if self._latest_identity_frame is None:
+                return None
+            return self._latest_identity_frame.copy()
 
     def mjpeg_generator(self) -> Iterator[bytes]:
         while True:
@@ -197,6 +215,10 @@ class VisionService:
 
                     if self.config.mirror:
                         frame = cv2.flip(frame, 1)
+
+                    # Save a clean frame before hand landmarks and engineering overlays.
+                    with self._lock:
+                        self._latest_identity_frame = frame.copy()
 
                     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     face_results = face_detector.process(rgb)
@@ -264,6 +286,7 @@ class VisionService:
         finally:
             with self._lock:
                 self._release_camera_locked()
+                self._latest_identity_frame = None
                 self._status.running = False
                 self._status.camera_opened = False
                 self._status.greeting_recent = False
@@ -378,19 +401,27 @@ class VisionService:
         with self._lock:
             self._status.ok = False
             self._status.error = message
-            self._status.state = self.state_machine.state.value
-            self._latest_jpeg = self._make_placeholder_frame(message)
 
     def _encode_jpeg(self, frame: np.ndarray) -> bytes:
-        ok, encoded = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.config.jpeg_quality])
+        ok, encoded = cv2.imencode(
+            ".jpg",
+            frame,
+            [int(cv2.IMWRITE_JPEG_QUALITY), int(self.config.jpeg_quality)],
+        )
         if not ok:
-            return self._make_placeholder_frame("JPEG encode failed")
+            return self._make_placeholder_frame("JPEG encoding failed")
         return encoded.tobytes()
 
     def _make_placeholder_frame(self, message: str) -> bytes:
         frame = np.zeros((self.config.frame_height, self.config.frame_width, 3), dtype=np.uint8)
-        cv2.putText(frame, message[:70], (28, self.config.frame_height // 2), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
-        ok, encoded = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.config.jpeg_quality])
-        if not ok:
-            return b""
-        return encoded.tobytes()
+        cv2.putText(
+            frame,
+            message[:70],
+            (20, max(40, self.config.frame_height // 2)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2,
+        )
+        ok, encoded = cv2.imencode(".jpg", frame)
+        return encoded.tobytes() if ok else b""
