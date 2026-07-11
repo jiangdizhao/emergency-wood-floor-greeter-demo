@@ -16,12 +16,7 @@ BOOLEAN_FIELDS = {
     "has_elderly",
     "humid_environment",
 }
-FIELD_NAMES = {
-    "room_type",
-    "style",
-    "budget",
-    *BOOLEAN_FIELDS,
-}
+FIELD_NAMES = {"room_type", "style", "budget", *BOOLEAN_FIELDS}
 PRIORITIES = {"防水", "耐磨", "环保", "价格", "脚感", "好清洁"}
 SELF_MARKERS = ("我", "我们", "我家", "我们家", "家里", "家中", "自己家", "我的")
 NEGATIVE_MARKERS = ("没有", "没", "不", "无", "未", "不是", "别", "不要")
@@ -36,8 +31,8 @@ ROOM_PATTERNS = {
     "老人房": ("老人房", "父母房", "长辈房"),
 }
 BUDGET_PATTERNS = {
-    "经济": ("经济", "预算有限", "便宜", "性价比", "价位低"),
-    "中等": ("中等", "适中", "普通预算", "不要太贵"),
+    "经济": ("经济", "预算有限", "便宜", "性价比", "价位低", "低预算"),
+    "中等": ("中等", "中档", "适中", "普通预算", "不要太贵"),
     "偏高": ("偏高", "高一点", "往上提一档", "预算可以高", "品质优先"),
     "高端": ("高端", "不差钱", "顶配", "豪华"),
 }
@@ -71,9 +66,22 @@ PRIORITY_ALIASES = {
     "脚感": ("脚感", "舒服", "舒适", "质感"),
     "好清洁": ("好清洁", "好打理", "容易清洁", "维护简单"),
 }
-COLOR_TOKENS = ("浅灰", "深灰", "灰色", "原木色", "奶油白", "白色", "深胡桃", "胡桃色", "浅橡木")
+COLOR_TOKENS = (
+    "浅灰色",
+    "浅灰",
+    "深灰色",
+    "深灰",
+    "灰色",
+    "原木色",
+    "奶油白",
+    "白色",
+    "深胡桃",
+    "胡桃色",
+    "浅橡木",
+    "深色系",
+)
 STYLE_PATTERNS = {
-    "现代简约": ("现代简约",),
+    "现代简约": ("现代简约", "现代风", "简约风"),
     "北欧": ("北欧", "北欧风"),
     "新中式": ("新中式",),
     "轻奢": ("轻奢",),
@@ -82,6 +90,16 @@ STYLE_PATTERNS = {
     "自然风": ("自然风",),
     "灰调": ("灰调",),
 }
+RECOMMENDATION_MARKERS = (
+    "推荐",
+    "给个方案",
+    "给我方案",
+    "怎么选",
+    "哪个合适",
+    "帮我选",
+    "直接给个",
+    "适合的方案",
+)
 
 
 @dataclass(frozen=True)
@@ -100,13 +118,18 @@ class ValidationGuard:
 
     @staticmethod
     def normalize_text(text: str) -> str:
-        # Character-spaced ASR text such as “S P C” and “我 家” becomes usable,
-        # while punctuation remains available to the model and evidence checker.
         return re.sub(r"\s+", "", text or "").strip()
 
-    def validate(self, *, user_text: str, semantic_turn: SemanticTurn) -> ValidationResult:
+    def validate(
+        self,
+        *,
+        user_text: str,
+        semantic_turn: SemanticTurn,
+        pending_slot: str | None = None,
+    ) -> ValidationResult:
         normalized_text = self.normalize_text(user_text)
-        backend_self_context = self._backend_self_context(normalized_text, semantic_turn)
+        semantic_turn = self._normalize_intent_from_text(normalized_text, semantic_turn)
+        backend_self_context = self._backend_self_context(normalized_text, semantic_turn, pending_slot)
         target_scope = (
             "turn_only"
             if semantic_turn.intent in {"request_recommendation", "request_comparison"}
@@ -117,6 +140,7 @@ class ValidationGuard:
         accepted: list[ValidatedAction] = []
         rejected: list[str] = []
         warnings: list[str] = []
+        conflicts: list[str] = []
         seen_updates: dict[tuple[str, str], str] = {}
 
         for action in semantic_turn.actions:
@@ -131,10 +155,32 @@ class ValidationGuard:
             conflict_key = (validated.kind, validated.name)
             previous_value = seen_updates.get(conflict_key)
             if previous_value is not None and previous_value != validated.value:
-                rejected.append(f"conflicting action for {validated.kind}:{validated.name}")
+                conflicts.append(f"conflicting action for {validated.kind}:{validated.name}")
+                accepted = [
+                    item
+                    for item in accepted
+                    if (item.kind, item.name) != conflict_key
+                ]
                 continue
             seen_updates[conflict_key] = validated.value
             accepted.append(validated)
+
+        recovered = self._recover_pending_slot_action(
+            text=normalized_text,
+            pending_slot=pending_slot,
+            existing=accepted,
+        )
+        if recovered is not None:
+            accepted.append(recovered)
+            warnings.append(f"backend recovered short answer for pending slot: {pending_slot}")
+            semantic_turn = semantic_turn.model_copy(
+                update={
+                    "intent": "provide_or_modify_needs",
+                    "explicit_self_context": True,
+                    "uncertain": False,
+                    "confidence": max(semantic_turn.confidence, 0.90),
+                }
+            )
 
         provider_product_mentions = [
             value
@@ -145,8 +191,10 @@ class ValidationGuard:
             [*provider_product_mentions, *self._detect_product_mentions(normalized_text)]
         )
         mentioned_product_ids = [
-            product.id for product in self.product_service.resolve_product_references(mentioned_products)
+            product.id
+            for product in self.product_service.resolve_product_references(mentioned_products)
         ]
+
         provider_color_mentions = [
             value
             for value in semantic_turn.mentioned_colors
@@ -155,14 +203,23 @@ class ValidationGuard:
         mentioned_colors = self._unique(
             [*provider_color_mentions, *self._detect_color_mentions(normalized_text)]
         )
+        if recovered is not None and recovered.kind in {"prefer_color", "reject_color"}:
+            mentioned_colors = self._unique([*mentioned_colors, recovered.name])
 
         expected_claims = self._detect_claims(normalized_text)
         actual_claims = self._claims_from_actions(accepted)
-        missing_claims = sorted(claim.key() for claim in expected_claims if claim not in actual_claims)
+        missing_claims = sorted(
+            claim.key() for claim in expected_claims if claim not in actual_claims
+        )
 
-        expected_recommendation = semantic_turn.intent in {"request_recommendation", "request_comparison"}
+        expected_recommendation = semantic_turn.intent in {
+            "request_recommendation",
+            "request_comparison",
+        }
         if semantic_turn.recommendation_requested != expected_recommendation:
-            warnings.append("recommendation_requested did not match intent and was normalized by backend")
+            warnings.append(
+                "recommendation_requested did not match intent and was normalized by backend"
+            )
 
         semantic_turn = semantic_turn.model_copy(
             update={
@@ -174,32 +231,166 @@ class ValidationGuard:
 
         if semantic_turn.intent == "request_comparison" and len(mentioned_product_ids) < 2:
             missing_claims.append("comparison requires two resolvable products")
-        if semantic_turn.intent == "reject_product" and not any(a.kind == "reject_product" for a in accepted):
-            missing_claims.append("reject_product intent requires a validated reject_product action")
-        if semantic_turn.intent == "reject_color" and not any(a.kind == "reject_color" for a in accepted):
-            missing_claims.append("reject_color intent requires a validated reject_color action")
+        if semantic_turn.intent == "reject_product" and not any(
+            action.kind == "reject_product" for action in accepted
+        ):
+            missing_claims.append(
+                "reject_product intent requires a validated reject_product action"
+            )
+        if semantic_turn.intent == "reject_color" and not any(
+            action.kind == "reject_color" for action in accepted
+        ):
+            missing_claims.append(
+                "reject_color intent requires a validated reject_color action"
+            )
 
         if semantic_turn.uncertain:
             warnings.append("provider marked the parse as uncertain")
         if semantic_turn.confidence < 0.80:
-            warnings.append(f"provider confidence too low: {semantic_turn.confidence:.2f}")
+            warnings.append(f"provider confidence below preferred threshold: {semantic_turn.confidence:.2f}")
 
-        ok = not rejected and not missing_claims and not semantic_turn.uncertain and semantic_turn.confidence >= 0.80
-        clarification = None if ok else self._clarification_question(missing_claims, rejected)
+        critical_conflict = bool(conflicts)
+        can_apply = bool(accepted) and not critical_conflict
+        needs_clarification = (
+            critical_conflict
+            or bool(missing_claims)
+            or semantic_turn.confidence < 0.65
+            or (semantic_turn.uncertain and not can_apply)
+            or (
+                pending_slot is not None
+                and not can_apply
+                and semantic_turn.intent in {"other", "provide_or_modify_needs"}
+            )
+        )
+        ok = not needs_clarification
+        clarification = (
+            None
+            if ok
+            else self._clarification_question(
+                pending_slot=pending_slot,
+                missing_claims=missing_claims,
+                rejected=rejected,
+                conflicts=conflicts,
+            )
+        )
 
         return ValidationResult(
             ok=ok,
+            can_apply=can_apply,
+            needs_clarification=needs_clarification,
+            critical_conflict=critical_conflict,
             normalized_text=normalized_text,
             semantic_turn=semantic_turn,
             backend_self_context=backend_self_context,
-            actions=accepted if ok else [],
+            actions=accepted,
             mentioned_product_ids=self._unique(mentioned_product_ids),
             mentioned_colors=mentioned_colors,
             missing_claims=missing_claims,
-            rejected_actions=rejected,
+            rejected_actions=[*rejected, *conflicts],
             warnings=warnings,
             clarification_question=clarification,
         )
+
+    def _normalize_intent_from_text(
+        self,
+        text: str,
+        semantic_turn: SemanticTurn,
+    ) -> SemanticTurn:
+        if any(marker in text for marker in RECOMMENDATION_MARKERS):
+            if "对比" in text or "比较" in text or "差别" in text:
+                intent = "request_comparison"
+            else:
+                intent = "request_recommendation"
+            return semantic_turn.model_copy(
+                update={
+                    "intent": intent,
+                    "recommendation_requested": True,
+                    "uncertain": False,
+                    "confidence": max(semantic_turn.confidence, 0.90),
+                }
+            )
+        return semantic_turn
+
+    def _recover_pending_slot_action(
+        self,
+        *,
+        text: str,
+        pending_slot: str | None,
+        existing: list[ValidatedAction],
+    ) -> ValidatedAction | None:
+        if pending_slot is None or not text:
+            return None
+
+        if pending_slot == "room_type":
+            if any(action.kind == "set_field" and action.name == "room_type" for action in existing):
+                return None
+            for room, patterns in ROOM_PATTERNS.items():
+                evidence = next((pattern for pattern in patterns if pattern in text), None)
+                if evidence:
+                    return ValidatedAction(
+                        kind="set_field",
+                        name="room_type",
+                        value=room,
+                        evidence=evidence,
+                        scope="persistent",
+                    )
+
+        if pending_slot == "budget":
+            if any(action.kind == "set_field" and action.name == "budget" for action in existing):
+                return None
+            for budget, patterns in BUDGET_PATTERNS.items():
+                evidence = next((pattern for pattern in patterns if pattern in text), None)
+                if evidence:
+                    return ValidatedAction(
+                        kind="set_field",
+                        name="budget",
+                        value=budget,
+                        evidence=evidence,
+                        scope="persistent",
+                    )
+
+        if pending_slot == "style":
+            if any(action.kind == "set_field" and action.name == "style" for action in existing):
+                return None
+            for style, patterns in STYLE_PATTERNS.items():
+                evidence = next((pattern for pattern in patterns if pattern in text), None)
+                if evidence:
+                    return ValidatedAction(
+                        kind="set_field",
+                        name="style",
+                        value=style,
+                        evidence=evidence,
+                        scope="persistent",
+                    )
+
+        if pending_slot == "preferred_color":
+            if any(action.kind in {"prefer_color", "reject_color"} for action in existing):
+                return None
+            colors = self._detect_color_mentions(text)
+            if colors:
+                color = colors[0]
+                return ValidatedAction(
+                    kind="prefer_color",
+                    name=color,
+                    value="prefer",
+                    evidence=color,
+                    scope="persistent",
+                )
+
+        if pending_slot == "priority":
+            if any(action.kind == "set_priority" for action in existing):
+                return None
+            for priority, aliases in PRIORITY_ALIASES.items():
+                evidence = next((alias for alias in aliases if alias in text), None)
+                if evidence:
+                    return ValidatedAction(
+                        kind="set_priority",
+                        name=priority,
+                        value="high",
+                        evidence=evidence,
+                        scope="persistent",
+                    )
+        return None
 
     def _validate_action(
         self,
@@ -282,11 +473,9 @@ class ValidationGuard:
                 claims.add(Claim("field", "style", style))
                 break
         for field_name, value_patterns in BOOLEAN_CLAIMS.items():
-            negative_patterns = value_patterns["no"]
-            positive_patterns = value_patterns["yes"]
-            if any(pattern in text for pattern in negative_patterns):
+            if any(pattern in text for pattern in value_patterns["no"]):
                 claims.add(Claim("field", field_name, "no"))
-            elif any(pattern in text for pattern in positive_patterns):
+            elif any(pattern in text for pattern in value_patterns["yes"]):
                 claims.add(Claim("field", field_name, "yes"))
         for priority, patterns in PRIORITY_ALIASES.items():
             if not any(pattern in text for pattern in patterns):
@@ -294,8 +483,15 @@ class ValidationGuard:
             if priority == "价格" and not any(
                 phrase in text
                 for phrase in (
-                    "价格最重要", "价格优先", "重点看价格", "更在意价格", "性价比最重要",
-                    "价格不重要", "不用考虑价格", "去掉价格", "不需要考虑价格",
+                    "价格最重要",
+                    "价格优先",
+                    "重点看价格",
+                    "更在意价格",
+                    "性价比最重要",
+                    "价格不重要",
+                    "不用考虑价格",
+                    "去掉价格",
+                    "不需要考虑价格",
                 )
             ):
                 continue
@@ -320,10 +516,23 @@ class ValidationGuard:
                 claims.add(Claim("priority", action.name, action.value))
         return claims
 
-    def _backend_self_context(self, text: str, semantic_turn: SemanticTurn) -> bool:
-        if semantic_turn.intent in {"provide_or_modify_needs", "reject_product", "reject_color"}:
+    def _backend_self_context(
+        self,
+        text: str,
+        semantic_turn: SemanticTurn,
+        pending_slot: str | None,
+    ) -> bool:
+        if pending_slot is not None:
             return True
-        return semantic_turn.explicit_self_context or any(marker in text for marker in SELF_MARKERS)
+        if semantic_turn.intent in {
+            "provide_or_modify_needs",
+            "reject_product",
+            "reject_color",
+        }:
+            return True
+        return semantic_turn.explicit_self_context or any(
+            marker in text for marker in SELF_MARKERS
+        )
 
     @staticmethod
     def _canonical_field_value(field_name: str, value: str) -> str:
@@ -344,10 +553,19 @@ class ValidationGuard:
                 "中等档": "中等",
                 "偏高档": "偏高",
                 "高端档": "高端",
+                "中档": "中等",
             }
             return mapping.get(lower, mapping.get(value, value))
         if field_name in BOOLEAN_FIELDS:
-            mapping = {"true": "yes", "false": "no", "有": "yes", "是": "yes", "没有": "no", "无": "no", "否": "no"}
+            mapping = {
+                "true": "yes",
+                "false": "no",
+                "有": "yes",
+                "是": "yes",
+                "没有": "no",
+                "无": "no",
+                "否": "no",
+            }
             return mapping.get(lower, mapping.get(value, value))
         if field_name == "style":
             for style, patterns in STYLE_PATTERNS.items():
@@ -378,7 +596,14 @@ class ValidationGuard:
 
     @staticmethod
     def _detect_color_mentions(text: str) -> list[str]:
-        return [token for token in COLOR_TOKENS if token in text]
+        found = [token for token in COLOR_TOKENS if token in text]
+        found.sort(key=len, reverse=True)
+        output: list[str] = []
+        for color in found:
+            if any(color in existing or existing in color for existing in output):
+                continue
+            output.append(color)
+        return output
 
     @staticmethod
     def _canonical_product_mentions(values: Iterable[str]) -> list[str]:
@@ -409,7 +634,24 @@ class ValidationGuard:
         return output
 
     @staticmethod
-    def _clarification_question(missing_claims: list[str], rejected: list[str]) -> str:
+    def _clarification_question(
+        *,
+        pending_slot: str | None,
+        missing_claims: list[str],
+        rejected: list[str],
+        conflicts: list[str],
+    ) -> str:
+        pending_questions = {
+            "room_type": "我没有听清房间。请只回答：客厅、卧室或全屋。",
+            "budget": "我没有听清预算。请只回答：经济、中等、偏高或高端。",
+            "style": "我没有听清风格。请只回答：现代简约、北欧原木、新中式或其他风格。",
+            "preferred_color": "我没有听清颜色。请只回答：浅灰色、原木色或深色系。",
+            "priority": "我没有听清重点。请只回答：防水、耐磨、环保、价格、脚感或好清洁。",
+        }
+        if pending_slot in pending_questions:
+            return pending_questions[pending_slot]
+        if conflicts:
+            return "我听到同一个条件有两个不同答案。请只确认最终要保留的那个条件。"
         if missing_claims:
             first = missing_claims[0]
             if "has_floor_heating" in first:
@@ -417,9 +659,9 @@ class ValidationGuard:
             if "has_pets" in first:
                 return "我没有完全确认宠物条件。请问您家目前有养猫或养狗吗？"
             if "priority" in first:
-                return "我可能漏掉了您最关注的性能。请再确认一下，您最重视防水、耐磨、环保、价格、脚感还是好清洁？"
+                return "我可能漏掉了您最关注的性能。请确认您最重视防水、耐磨、环保、价格、脚感还是好清洁？"
             if "comparison" in first:
                 return "请再告诉我您想比较的两个产品或材质，例如 SPC 和多层实木。"
         if rejected:
-            return "我没有完全理解这句话中的修改。请用一句更直接的话确认您要新增、修改或取消的条件。"
-        return "我没有完全理解您的需求。请再说一次房间、预算和最重要的使用条件。"
+            return "我已经记录了听清的部分。请只用一句话确认刚才要修改的那个条件。"
+        return "我没有完全听清。请只说一个最重要的条件。"
