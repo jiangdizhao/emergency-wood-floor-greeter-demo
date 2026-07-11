@@ -1,0 +1,1402 @@
+{
+  "benchmark_version": "3.0",
+  "started_at": "2026-07-11T12:07:05.219765+10:00",
+  "model": "qwen3.5:4b",
+  "preload_seconds": 7.556825200008461,
+  "passed": 10,
+  "total": 10,
+  "pass_rate": 1.0,
+  "results": [
+    {
+      "case_id": "T01_basic_needs",
+      "passed": true,
+      "failures": [],
+      "raw_intent": {
+        "intent": "request_recommendation",
+        "is_question": false,
+        "explicit_self_context": true,
+        "recommendation_requested": true,
+        "mentioned_products": [],
+        "mentioned_colors": [],
+        "confidence": 0.95
+      },
+      "resolved_intent": {
+        "intent": "provide_or_modify_needs",
+        "is_question": false,
+        "explicit_self_context": true,
+        "recommendation_requested": false,
+        "mentioned_products": [],
+        "mentioned_colors": [],
+        "confidence": 0.95,
+        "route_source": "rule:self"
+      },
+      "raw_facts": {
+        "field_updates": [
+          {
+            "field": "room_type",
+            "value": "全屋",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          {
+            "field": "budget",
+            "value": "中等",
+            "scope": "turn_only",
+            "evidence": "预算中等"
+          },
+          {
+            "field": "has_pets",
+            "value": "yes",
+            "scope": "turn_only",
+            "evidence": "家里有一只狗"
+          }
+        ],
+        "priority_updates": [
+          {
+            "name": "耐磨",
+            "level": "high",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          {
+            "name": "好清洁",
+            "level": "high",
+            "scope": "persistent",
+            "evidence": ""
+          }
+        ],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "accepted": {
+        "field_updates": [
+          {
+            "field": "room_type",
+            "value": "客厅",
+            "scope": "persistent",
+            "evidence": "客厅用"
+          },
+          {
+            "field": "budget",
+            "value": "中等",
+            "scope": "persistent",
+            "evidence": "预算中等"
+          },
+          {
+            "field": "has_pets",
+            "value": "yes",
+            "scope": "persistent",
+            "evidence": "家里有一只狗"
+          }
+        ],
+        "priority_updates": [
+          {
+            "name": "耐磨",
+            "level": "high",
+            "scope": "persistent",
+            "evidence": "耐磨"
+          },
+          {
+            "name": "好清洁",
+            "level": "high",
+            "scope": "persistent",
+            "evidence": "好清洁"
+          }
+        ],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "recoveries": [
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "room_type",
+            "value": "客厅",
+            "scope": "persistent",
+            "evidence": "客厅用"
+          },
+          "reason": "high_precision_explicit_evidence"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "budget",
+            "value": "中等",
+            "scope": "persistent",
+            "evidence": "预算中等"
+          },
+          "reason": "high_precision_explicit_evidence"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "has_pets",
+            "value": "yes",
+            "scope": "persistent",
+            "evidence": "家里有一只狗"
+          },
+          "reason": "high_precision_explicit_evidence"
+        },
+        {
+          "kind": "priority_updates",
+          "item": {
+            "name": "耐磨",
+            "level": "high",
+            "scope": "persistent",
+            "evidence": "耐磨"
+          },
+          "reason": "high_precision_explicit_evidence"
+        },
+        {
+          "kind": "priority_updates",
+          "item": {
+            "name": "好清洁",
+            "level": "high",
+            "scope": "persistent",
+            "evidence": "好清洁"
+          },
+          "reason": "high_precision_explicit_evidence"
+        }
+      ],
+      "rejections": [
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "room_type",
+            "value": "全屋",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          "reason": "evidence_not_verbatim"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "budget",
+            "value": "中等",
+            "scope": "persistent",
+            "evidence": "预算中等"
+          },
+          "reason": "duplicate_or_conflict"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "has_pets",
+            "value": "yes",
+            "scope": "persistent",
+            "evidence": "家里有一只狗"
+          },
+          "reason": "duplicate_or_conflict"
+        },
+        {
+          "kind": "priority_updates",
+          "item": {
+            "name": "耐磨",
+            "level": "high",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          "reason": "evidence_not_verbatim"
+        },
+        {
+          "kind": "priority_updates",
+          "item": {
+            "name": "好清洁",
+            "level": "high",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          "reason": "evidence_not_verbatim"
+        }
+      ],
+      "seconds": 5.244825000001583,
+      "done_reasons": [
+        "stop",
+        "stop"
+      ]
+    },
+    {
+      "case_id": "T02_correction",
+      "passed": true,
+      "failures": [],
+      "raw_intent": {
+        "intent": "request_recommendation",
+        "is_question": false,
+        "explicit_self_context": true,
+        "recommendation_requested": true,
+        "mentioned_products": [],
+        "mentioned_colors": [],
+        "confidence": 0.95
+      },
+      "resolved_intent": {
+        "intent": "provide_or_modify_needs",
+        "is_question": false,
+        "explicit_self_context": true,
+        "recommendation_requested": false,
+        "mentioned_products": [],
+        "mentioned_colors": [],
+        "confidence": 0.95,
+        "route_source": "rule:self"
+      },
+      "raw_facts": {
+        "field_updates": [
+          {
+            "field": "room_type",
+            "value": "卧室",
+            "scope": "persistent",
+            "evidence": "不是客厅，是卧室"
+          },
+          {
+            "field": "has_floor_heating",
+            "value": "no",
+            "scope": "persistent",
+            "evidence": "我家没有地暖"
+          }
+        ],
+        "priority_updates": [],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "accepted": {
+        "field_updates": [
+          {
+            "field": "room_type",
+            "value": "卧室",
+            "scope": "persistent",
+            "evidence": "是卧室"
+          },
+          {
+            "field": "has_floor_heating",
+            "value": "no",
+            "scope": "persistent",
+            "evidence": "没有地暖"
+          }
+        ],
+        "priority_updates": [],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "recoveries": [
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "room_type",
+            "value": "卧室",
+            "scope": "persistent",
+            "evidence": "是卧室"
+          },
+          "reason": "high_precision_explicit_evidence"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "has_floor_heating",
+            "value": "no",
+            "scope": "persistent",
+            "evidence": "没有地暖"
+          },
+          "reason": "high_precision_explicit_evidence"
+        }
+      ],
+      "rejections": [
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "room_type",
+            "value": "卧室",
+            "scope": "persistent",
+            "evidence": "不是客厅，是卧室"
+          },
+          "reason": "duplicate_or_conflict"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "has_floor_heating",
+            "value": "no",
+            "scope": "persistent",
+            "evidence": "我家没有地暖"
+          },
+          "reason": "duplicate_or_conflict"
+        }
+      ],
+      "seconds": 3.860884800000349,
+      "done_reasons": [
+        "stop",
+        "stop"
+      ]
+    },
+    {
+      "case_id": "T03_priority_rerank",
+      "passed": true,
+      "failures": [],
+      "raw_intent": {
+        "intent": "request_recommendation",
+        "is_question": false,
+        "explicit_self_context": true,
+        "recommendation_requested": true,
+        "mentioned_products": [],
+        "mentioned_colors": [],
+        "confidence": 0.95
+      },
+      "resolved_intent": {
+        "intent": "provide_or_modify_needs",
+        "is_question": false,
+        "explicit_self_context": true,
+        "recommendation_requested": false,
+        "mentioned_products": [],
+        "mentioned_colors": [],
+        "confidence": 0.95,
+        "route_source": "rule:self"
+      },
+      "raw_facts": {
+        "field_updates": [
+          {
+            "field": "room_type",
+            "value": "",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          {
+            "field": "budget",
+            "value": "",
+            "scope": "turn_only",
+            "evidence": "预算可以稍微高一些"
+          },
+          {
+            "field": "style",
+            "value": "",
+            "scope": "persistent",
+            "evidence": ""
+          }
+        ],
+        "priority_updates": [
+          {
+            "name": "防水",
+            "level": "low",
+            "scope": "turn_only",
+            "evidence": "防水不是最重要"
+          },
+          {
+            "name": "脚感",
+            "level": "high",
+            "scope": "turn_only",
+            "evidence": "我更看重脚感"
+          }
+        ],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "accepted": {
+        "field_updates": [
+          {
+            "field": "budget",
+            "value": "偏高",
+            "scope": "persistent",
+            "evidence": "预算可以稍微高一些"
+          }
+        ],
+        "priority_updates": [
+          {
+            "name": "防水",
+            "level": "low",
+            "scope": "persistent",
+            "evidence": "防水不是最重要"
+          },
+          {
+            "name": "脚感",
+            "level": "high",
+            "scope": "persistent",
+            "evidence": "更看重脚感"
+          }
+        ],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "recoveries": [
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "budget",
+            "value": "偏高",
+            "scope": "persistent",
+            "evidence": "预算可以稍微高一些"
+          },
+          "reason": "high_precision_explicit_evidence"
+        },
+        {
+          "kind": "priority_updates",
+          "item": {
+            "name": "防水",
+            "level": "low",
+            "scope": "persistent",
+            "evidence": "防水不是最重要"
+          },
+          "reason": "high_precision_explicit_evidence"
+        },
+        {
+          "kind": "priority_updates",
+          "item": {
+            "name": "脚感",
+            "level": "high",
+            "scope": "persistent",
+            "evidence": "更看重脚感"
+          },
+          "reason": "high_precision_explicit_evidence"
+        }
+      ],
+      "rejections": [
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "room_type",
+            "value": "",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          "reason": "evidence_not_verbatim"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "budget",
+            "value": "",
+            "scope": "persistent",
+            "evidence": "预算可以稍微高一些"
+          },
+          "reason": "duplicate_or_conflict"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "style",
+            "value": "",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          "reason": "evidence_not_verbatim"
+        },
+        {
+          "kind": "priority_updates",
+          "item": {
+            "name": "防水",
+            "level": "low",
+            "scope": "persistent",
+            "evidence": "防水不是最重要"
+          },
+          "reason": "duplicate_or_conflict"
+        },
+        {
+          "kind": "priority_updates",
+          "item": {
+            "name": "脚感",
+            "level": "high",
+            "scope": "persistent",
+            "evidence": "我更看重脚感"
+          },
+          "reason": "duplicate_or_conflict"
+        }
+      ],
+      "seconds": 4.645976400002837,
+      "done_reasons": [
+        "stop",
+        "stop"
+      ]
+    },
+    {
+      "case_id": "T04_color_change",
+      "passed": true,
+      "failures": [],
+      "raw_intent": {
+        "intent": "reject_color",
+        "is_question": true,
+        "explicit_self_context": false,
+        "recommendation_requested": true,
+        "mentioned_products": [],
+        "mentioned_colors": [
+          "灰色"
+        ],
+        "confidence": 0.95
+      },
+      "resolved_intent": {
+        "intent": "reject_color",
+        "is_question": true,
+        "explicit_self_context": true,
+        "recommendation_requested": false,
+        "mentioned_products": [],
+        "mentioned_colors": [
+          "灰色",
+          "原木色",
+          "暖色"
+        ],
+        "confidence": 0.95,
+        "route_source": "rule:reject_color"
+      },
+      "raw_facts": {
+        "field_updates": [
+          {
+            "field": "room_type",
+            "value": "",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          {
+            "field": "budget",
+            "value": "",
+            "scope": "persistent",
+            "evidence": ""
+          }
+        ],
+        "priority_updates": [],
+        "color_preferences": [
+          {
+            "color": "灰色",
+            "preference": "reject",
+            "scope": "turn_only",
+            "evidence": "我不喜欢灰色"
+          },
+          {
+            "color": "原木色",
+            "preference": "prefer",
+            "scope": "turn_only",
+            "evidence": "还有原木色的吗？"
+          },
+          {
+            "color": "暖色",
+            "preference": "prefer",
+            "scope": "turn_only",
+            "evidence": "或者暖色的吗"
+          }
+        ],
+        "product_preferences": [
+          {
+            "product": "",
+            "preference": "reject",
+            "scope": "persistent",
+            "evidence": ""
+          }
+        ]
+      },
+      "accepted": {
+        "field_updates": [],
+        "priority_updates": [],
+        "color_preferences": [
+          {
+            "color": "灰色",
+            "preference": "reject",
+            "scope": "persistent",
+            "evidence": "不喜欢灰色"
+          },
+          {
+            "color": "原木色",
+            "preference": "prefer",
+            "scope": "persistent",
+            "evidence": "原木色"
+          },
+          {
+            "color": "暖色",
+            "preference": "prefer",
+            "scope": "persistent",
+            "evidence": "暖色"
+          }
+        ],
+        "product_preferences": []
+      },
+      "recoveries": [
+        {
+          "kind": "color_preferences",
+          "item": {
+            "color": "灰色",
+            "preference": "reject",
+            "scope": "persistent",
+            "evidence": "不喜欢灰色"
+          },
+          "reason": "high_precision_explicit_evidence"
+        },
+        {
+          "kind": "color_preferences",
+          "item": {
+            "color": "原木色",
+            "preference": "prefer",
+            "scope": "persistent",
+            "evidence": "原木色"
+          },
+          "reason": "high_precision_explicit_evidence"
+        },
+        {
+          "kind": "color_preferences",
+          "item": {
+            "color": "暖色",
+            "preference": "prefer",
+            "scope": "persistent",
+            "evidence": "暖色"
+          },
+          "reason": "high_precision_explicit_evidence"
+        }
+      ],
+      "rejections": [
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "room_type",
+            "value": "",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          "reason": "evidence_not_verbatim"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "budget",
+            "value": "",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          "reason": "evidence_not_verbatim"
+        },
+        {
+          "kind": "color_preferences",
+          "item": {
+            "color": "灰色",
+            "preference": "reject",
+            "scope": "persistent",
+            "evidence": "我不喜欢灰色"
+          },
+          "reason": "duplicate_or_conflict"
+        },
+        {
+          "kind": "color_preferences",
+          "item": {
+            "color": "原木色",
+            "preference": "prefer",
+            "scope": "turn_only",
+            "evidence": "还有原木色的吗？"
+          },
+          "reason": "evidence_not_verbatim"
+        },
+        {
+          "kind": "color_preferences",
+          "item": {
+            "color": "暖色",
+            "preference": "prefer",
+            "scope": "persistent",
+            "evidence": "或者暖色的吗"
+          },
+          "reason": "duplicate_or_conflict"
+        },
+        {
+          "kind": "product_preferences",
+          "item": {
+            "product": "",
+            "preference": "reject",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          "reason": "evidence_not_verbatim"
+        }
+      ],
+      "seconds": 5.05639300000621,
+      "done_reasons": [
+        "stop",
+        "stop"
+      ]
+    },
+    {
+      "case_id": "T05_ask_reason",
+      "passed": true,
+      "failures": [],
+      "raw_intent": {
+        "intent": "ask_reason",
+        "is_question": true,
+        "explicit_self_context": false,
+        "recommendation_requested": false,
+        "mentioned_products": [
+          "多层实木"
+        ],
+        "mentioned_colors": [],
+        "confidence": 0.95
+      },
+      "resolved_intent": {
+        "intent": "ask_reason",
+        "is_question": true,
+        "explicit_self_context": false,
+        "recommendation_requested": false,
+        "mentioned_products": [
+          "多层实木"
+        ],
+        "mentioned_colors": [],
+        "confidence": 0.95,
+        "route_source": "rule:why"
+      },
+      "raw_facts": {
+        "field_updates": [],
+        "priority_updates": [],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "accepted": {
+        "field_updates": [],
+        "priority_updates": [],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "recoveries": [],
+      "rejections": [],
+      "seconds": 1.8745913000020664,
+      "done_reasons": [
+        "stop",
+        "skipped"
+      ]
+    },
+    {
+      "case_id": "T06_comparison_generic",
+      "passed": true,
+      "failures": [],
+      "raw_intent": {
+        "intent": "request_comparison",
+        "is_question": true,
+        "explicit_self_context": false,
+        "recommendation_requested": true,
+        "mentioned_products": [
+          "SPC",
+          "多层实木"
+        ],
+        "mentioned_colors": [],
+        "confidence": 0.95
+      },
+      "resolved_intent": {
+        "intent": "request_comparison",
+        "is_question": true,
+        "explicit_self_context": false,
+        "recommendation_requested": true,
+        "mentioned_products": [
+          "SPC",
+          "多层实木"
+        ],
+        "mentioned_colors": [],
+        "confidence": 0.95,
+        "route_source": "rule:comparison"
+      },
+      "raw_facts": {
+        "field_updates": [
+          {
+            "field": "room_type",
+            "value": "",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          {
+            "field": "budget",
+            "value": "",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          {
+            "field": "has_pets",
+            "value": "yes",
+            "scope": "turn_only",
+            "evidence": "有宠物"
+          },
+          {
+            "field": "has_floor_heating",
+            "value": "yes",
+            "scope": "turn_only",
+            "evidence": "地暖"
+          }
+        ],
+        "priority_updates": [],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "accepted": {
+        "field_updates": [
+          {
+            "field": "has_pets",
+            "value": "yes",
+            "scope": "turn_only",
+            "evidence": "宠物"
+          },
+          {
+            "field": "has_floor_heating",
+            "value": "yes",
+            "scope": "turn_only",
+            "evidence": "有地暖"
+          }
+        ],
+        "priority_updates": [],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "recoveries": [
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "has_pets",
+            "value": "yes",
+            "scope": "turn_only",
+            "evidence": "宠物"
+          },
+          "reason": "high_precision_explicit_evidence"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "has_floor_heating",
+            "value": "yes",
+            "scope": "turn_only",
+            "evidence": "有地暖"
+          },
+          "reason": "high_precision_explicit_evidence"
+        }
+      ],
+      "rejections": [
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "room_type",
+            "value": "",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          "reason": "evidence_not_verbatim"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "budget",
+            "value": "",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          "reason": "evidence_not_verbatim"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "has_pets",
+            "value": "yes",
+            "scope": "turn_only",
+            "evidence": "有宠物"
+          },
+          "reason": "evidence_not_verbatim"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "has_floor_heating",
+            "value": "yes",
+            "scope": "turn_only",
+            "evidence": "地暖"
+          },
+          "reason": "duplicate_or_conflict"
+        }
+      ],
+      "seconds": 4.623493099992629,
+      "done_reasons": [
+        "stop",
+        "stop"
+      ]
+    },
+    {
+      "case_id": "T07_explicit_product_reject",
+      "passed": true,
+      "failures": [],
+      "raw_intent": {
+        "intent": "reject_product",
+        "is_question": false,
+        "explicit_self_context": true,
+        "recommendation_requested": true,
+        "mentioned_products": [
+          "SPC"
+        ],
+        "mentioned_colors": [],
+        "confidence": 0.95
+      },
+      "resolved_intent": {
+        "intent": "reject_product",
+        "is_question": false,
+        "explicit_self_context": true,
+        "recommendation_requested": false,
+        "mentioned_products": [
+          "SPC"
+        ],
+        "mentioned_colors": [],
+        "confidence": 0.95,
+        "route_source": "rule:reject_product"
+      },
+      "raw_facts": {
+        "field_updates": [
+          {
+            "field": "room_type",
+            "value": "客厅/卧室/全屋/厨房/书房/儿童房/老人房/未知",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          {
+            "field": "budget",
+            "value": "经济/中等/偏高/高端/未知",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          {
+            "field": "style",
+            "value": "现代/北欧/美式/法式/中式/其他/未知",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          {
+            "field": "room_type",
+            "value": "客厅/卧室/全屋/厨房/书房/儿童房/老人房/未知",
+            "scope": "turn_only",
+            "evidence": ""
+          }
+        ],
+        "priority_updates": [
+          {
+            "name": "脚感",
+            "level": "high",
+            "scope": "turn_only",
+            "evidence": "换一款脚感更舒服的"
+          }
+        ],
+        "color_preferences": [],
+        "product_preferences": [
+          {
+            "product": "SPC",
+            "preference": "reject",
+            "scope": "persistent",
+            "evidence": "我不想要 SPC"
+          },
+          {
+            "product": "未知",
+            "preference": "prefer",
+            "scope": "persistent",
+            "evidence": ""
+          }
+        ]
+      },
+      "accepted": {
+        "field_updates": [],
+        "priority_updates": [
+          {
+            "name": "脚感",
+            "level": "high",
+            "scope": "persistent",
+            "evidence": "脚感更舒服"
+          }
+        ],
+        "color_preferences": [],
+        "product_preferences": [
+          {
+            "product": "SPC",
+            "preference": "reject",
+            "scope": "persistent",
+            "evidence": "SPC"
+          }
+        ]
+      },
+      "recoveries": [
+        {
+          "kind": "priority_updates",
+          "item": {
+            "name": "脚感",
+            "level": "high",
+            "scope": "persistent",
+            "evidence": "脚感更舒服"
+          },
+          "reason": "high_precision_explicit_evidence"
+        },
+        {
+          "kind": "product_preferences",
+          "item": {
+            "product": "SPC",
+            "preference": "reject",
+            "scope": "persistent",
+            "evidence": "SPC"
+          },
+          "reason": "high_precision_explicit_evidence"
+        }
+      ],
+      "rejections": [
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "room_type",
+            "value": "客厅/卧室/全屋/厨房/书房/儿童房/老人房/未知",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          "reason": "evidence_not_verbatim"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "budget",
+            "value": "经济/中等/偏高/高端/未知",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          "reason": "evidence_not_verbatim"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "style",
+            "value": "现代/北欧/美式/法式/中式/其他/未知",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          "reason": "evidence_not_verbatim"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "room_type",
+            "value": "客厅/卧室/全屋/厨房/书房/儿童房/老人房/未知",
+            "scope": "turn_only",
+            "evidence": ""
+          },
+          "reason": "evidence_not_verbatim"
+        },
+        {
+          "kind": "priority_updates",
+          "item": {
+            "name": "脚感",
+            "level": "high",
+            "scope": "persistent",
+            "evidence": "换一款脚感更舒服的"
+          },
+          "reason": "duplicate_or_conflict"
+        },
+        {
+          "kind": "product_preferences",
+          "item": {
+            "product": "SPC",
+            "preference": "reject",
+            "scope": "persistent",
+            "evidence": "我不想要 SPC"
+          },
+          "reason": "duplicate_or_conflict"
+        },
+        {
+          "kind": "product_preferences",
+          "item": {
+            "product": "未知",
+            "preference": "prefer",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          "reason": "evidence_not_verbatim"
+        }
+      ],
+      "seconds": 6.660707100003492,
+      "done_reasons": [
+        "stop",
+        "stop"
+      ]
+    },
+    {
+      "case_id": "T08_general_question",
+      "passed": true,
+      "failures": [],
+      "raw_intent": {
+        "intent": "ask_reason",
+        "is_question": true,
+        "explicit_self_context": false,
+        "recommendation_requested": false,
+        "mentioned_products": [
+          "SPC"
+        ],
+        "mentioned_colors": [],
+        "confidence": 0.95
+      },
+      "resolved_intent": {
+        "intent": "general_product_question",
+        "is_question": true,
+        "explicit_self_context": false,
+        "recommendation_requested": false,
+        "mentioned_products": [
+          "SPC"
+        ],
+        "mentioned_colors": [],
+        "confidence": 0.95,
+        "route_source": "rule:question"
+      },
+      "raw_facts": {
+        "field_updates": [],
+        "priority_updates": [],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "accepted": {
+        "field_updates": [],
+        "priority_updates": [],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "recoveries": [],
+      "rejections": [],
+      "seconds": 2.0084716999990633,
+      "done_reasons": [
+        "stop",
+        "skipped"
+      ]
+    },
+    {
+      "case_id": "T09_explicit_no_children",
+      "passed": true,
+      "failures": [],
+      "raw_intent": {
+        "intent": "request_recommendation",
+        "is_question": false,
+        "explicit_self_context": true,
+        "recommendation_requested": true,
+        "mentioned_products": [],
+        "mentioned_colors": [],
+        "confidence": 0.95
+      },
+      "resolved_intent": {
+        "intent": "provide_or_modify_needs",
+        "is_question": false,
+        "explicit_self_context": true,
+        "recommendation_requested": false,
+        "mentioned_products": [],
+        "mentioned_colors": [],
+        "confidence": 0.95,
+        "route_source": "rule:self"
+      },
+      "raw_facts": {
+        "field_updates": [
+          {
+            "field": "room_type",
+            "value": "卧室",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          {
+            "field": "has_children",
+            "value": "no",
+            "scope": "turn_only",
+            "evidence": "家里没有小孩"
+          },
+          {
+            "field": "has_elderly",
+            "value": "yes",
+            "scope": "turn_only",
+            "evidence": "但有一位老人"
+          }
+        ],
+        "priority_updates": [],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "accepted": {
+        "field_updates": [
+          {
+            "field": "room_type",
+            "value": "卧室",
+            "scope": "persistent",
+            "evidence": "卧室用"
+          },
+          {
+            "field": "has_children",
+            "value": "no",
+            "scope": "persistent",
+            "evidence": "没有小孩"
+          },
+          {
+            "field": "has_elderly",
+            "value": "yes",
+            "scope": "persistent",
+            "evidence": "有一位老人"
+          }
+        ],
+        "priority_updates": [],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "recoveries": [
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "room_type",
+            "value": "卧室",
+            "scope": "persistent",
+            "evidence": "卧室用"
+          },
+          "reason": "high_precision_explicit_evidence"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "has_children",
+            "value": "no",
+            "scope": "persistent",
+            "evidence": "没有小孩"
+          },
+          "reason": "high_precision_explicit_evidence"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "has_elderly",
+            "value": "yes",
+            "scope": "persistent",
+            "evidence": "有一位老人"
+          },
+          "reason": "high_precision_explicit_evidence"
+        }
+      ],
+      "rejections": [
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "room_type",
+            "value": "卧室",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          "reason": "evidence_not_verbatim"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "has_children",
+            "value": "no",
+            "scope": "persistent",
+            "evidence": "家里没有小孩"
+          },
+          "reason": "duplicate_or_conflict"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "has_elderly",
+            "value": "yes",
+            "scope": "persistent",
+            "evidence": "但有一位老人"
+          },
+          "reason": "duplicate_or_conflict"
+        }
+      ],
+      "seconds": 4.501465299996198,
+      "done_reasons": [
+        "stop",
+        "stop"
+      ]
+    },
+    {
+      "case_id": "T10_omitted_is_unknown",
+      "passed": true,
+      "failures": [],
+      "raw_intent": {
+        "intent": "request_recommendation",
+        "is_question": false,
+        "explicit_self_context": true,
+        "recommendation_requested": true,
+        "mentioned_products": [],
+        "mentioned_colors": [],
+        "confidence": 0.95
+      },
+      "resolved_intent": {
+        "intent": "provide_or_modify_needs",
+        "is_question": false,
+        "explicit_self_context": true,
+        "recommendation_requested": false,
+        "mentioned_products": [],
+        "mentioned_colors": [],
+        "confidence": 0.95,
+        "route_source": "rule:self"
+      },
+      "raw_facts": {
+        "field_updates": [
+          {
+            "field": "room_type",
+            "value": "客厅",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          {
+            "field": "budget",
+            "value": "中等",
+            "scope": "turn_only",
+            "evidence": "预算中等"
+          }
+        ],
+        "priority_updates": [],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "accepted": {
+        "field_updates": [
+          {
+            "field": "room_type",
+            "value": "客厅",
+            "scope": "persistent",
+            "evidence": "客厅用"
+          },
+          {
+            "field": "budget",
+            "value": "中等",
+            "scope": "persistent",
+            "evidence": "预算中等"
+          }
+        ],
+        "priority_updates": [],
+        "color_preferences": [],
+        "product_preferences": []
+      },
+      "recoveries": [
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "room_type",
+            "value": "客厅",
+            "scope": "persistent",
+            "evidence": "客厅用"
+          },
+          "reason": "high_precision_explicit_evidence"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "budget",
+            "value": "中等",
+            "scope": "persistent",
+            "evidence": "预算中等"
+          },
+          "reason": "high_precision_explicit_evidence"
+        }
+      ],
+      "rejections": [
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "room_type",
+            "value": "客厅",
+            "scope": "persistent",
+            "evidence": ""
+          },
+          "reason": "evidence_not_verbatim"
+        },
+        {
+          "kind": "field_updates",
+          "item": {
+            "field": "budget",
+            "value": "中等",
+            "scope": "persistent",
+            "evidence": "预算中等"
+          },
+          "reason": "duplicate_or_conflict"
+        }
+      ],
+      "seconds": 3.9511049000138883,
+      "done_reasons": [
+        "stop",
+        "stop"
+      ]
+    }
+  ]
+}
