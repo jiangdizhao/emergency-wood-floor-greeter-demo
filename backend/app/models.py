@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 DialogueProvider = Literal["terra", "qwen"]
+PendingSlot = Literal["room_type", "budget", "style", "preferred_color", "priority"]
 
 
 class SessionState(str, Enum):
@@ -80,11 +81,18 @@ class ProductCompareResponse(BaseModel):
     comparison: list[ProductCompareRow]
 
 
+class ASRAlternative(BaseModel):
+    transcript: str
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
 class ChatRequest(BaseModel):
     text: str
     session_id: str = "demo-session-001"
     response_language: Literal["zh", "en"] | None = None
     provider_mode: DialogueProvider | None = None
+    asr_alternatives: list[ASRAlternative] = Field(default_factory=list)
+    asr_confirmed: bool = False
 
 
 class ChatResponse(BaseModel):
@@ -97,6 +105,10 @@ class ChatResponse(BaseModel):
     provider_label: str = "Private Local AI · Qwen 3.5"
     llm_degraded: bool = False
     needs_clarification: bool = False
+    pending_slot: PendingSlot | None = None
+    last_assistant_question: str | None = None
+    asr_confirmation_required: bool = False
+    asr_suggested_text: str | None = None
 
 
 class TTSRequest(BaseModel):
