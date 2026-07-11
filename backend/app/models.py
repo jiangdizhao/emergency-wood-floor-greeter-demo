@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 DialogueProvider = Literal["terra", "qwen"]
 PendingSlot = Literal["room_type", "budget", "style", "preferred_color", "priority"]
+IdentityChoice = Literal["continue_previous", "new_project", "not_me"]
 
 
 class SessionState(str, Enum):
@@ -38,6 +39,12 @@ class FlooringProduct(BaseModel):
 
 class CustomerProfile(BaseModel):
     session_id: str = "demo-session-001"
+    customer_id: str | None = None
+    is_returning_customer: bool = False
+    memory_summary: str = ""
+    previous_visit_summaries: list[str] = Field(default_factory=list)
+    last_seen_at: str | None = None
+
     customer_name: str | None = None
     phone: str | None = None
     room_type: str | None = None
@@ -152,3 +159,39 @@ class CustomerSaveRequest(BaseModel):
     session_id: str = "demo-session-001"
     customer_name: str | None = None
     phone: str | None = None
+
+
+class IdentityRecognizeRequest(BaseModel):
+    provider_mode: DialogueProvider | None = None
+
+
+class IdentityCandidateChoiceRequest(BaseModel):
+    candidate_token: str
+    choice: IdentityChoice
+    provider_mode: DialogueProvider | None = None
+
+
+class IdentityNewSessionRequest(BaseModel):
+    provider_mode: DialogueProvider | None = None
+
+
+class IdentityEnrollRequest(BaseModel):
+    session_id: str
+    consent: bool
+    display_name: str | None = None
+
+
+class IdentityForgetRequest(BaseModel):
+    session_id: str
+    delete_history: bool = True
+
+
+class IdentitySessionResponse(BaseModel):
+    ok: bool = True
+    session_id: str
+    customer_profile: CustomerProfile
+    returning_customer: bool = False
+    greeting: str
+    provider_mode: DialogueProvider
+    provider_label: str
+    memory_loaded: bool = False
