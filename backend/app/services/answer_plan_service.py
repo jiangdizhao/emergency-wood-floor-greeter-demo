@@ -4,12 +4,14 @@ from ..llm.schemas import (
     AnswerPlan,
     ApprovedCollectionFact,
     ApprovedProductFact,
+    ApprovedPromotion,
     DialogueDecision,
     SalesDecision,
     ValidationResult,
 )
 from ..models import CustomerProfile, FlooringProduct
 from .product_service import ProductService
+from .promotion_service import PromotionService
 from .sales_knowledge_service import SalesKnowledgeService
 
 
@@ -18,9 +20,11 @@ class AnswerPlanService:
         self,
         product_service: ProductService,
         sales_knowledge_service: SalesKnowledgeService | None = None,
+        promotion_service: PromotionService | None = None,
     ) -> None:
         self.product_service = product_service
         self.sales_knowledge_service = sales_knowledge_service or SalesKnowledgeService()
+        self.promotion_service = promotion_service or PromotionService()
 
     def build(
         self,
@@ -69,26 +73,32 @@ class AnswerPlanService:
                 profile=profile,
                 recommended_products=recommended_products,
             )
+            context = self._sales_context(profile=profile, products=products, sales_decision=sales_decision)
+            promotions = self._promotion_facts(profile=profile, products=products, context=context, force=False)
             return AnswerPlan(
                 response_type="comparison",
                 customer_need_summary=self._need_summary(profile),
                 products=[
-                    self._approved_product_fact(
-                        product,
-                        profile,
-                        presentation_role="对比款",
-                    )
+                    self._approved_product_fact(product, profile, presentation_role="对比款")
                     for product in products
                 ],
+                approved_promotions=promotions,
                 constraints=self._constraints(),
                 next_question=self._decision_question(profile, products),
                 direct_message=None,
                 must_recommend_now=bool(products),
-                **self._sales_context(profile=profile, products=products, sales_decision=sales_decision),
+                **context,
             )
 
         if decision.action == "recommend_now":
             products = recommended_products[:2]
+            context = self._sales_context(profile=profile, products=products, sales_decision=sales_decision)
+            promotions = self._promotion_facts(
+                profile=profile,
+                products=products,
+                context=context,
+                force=profile.promotion_interest is True,
+            )
             approved_products = [
                 self._approved_product_fact(
                     product,
@@ -101,11 +111,12 @@ class AnswerPlanService:
                 response_type="recommendation",
                 customer_need_summary=self._need_summary(profile),
                 products=approved_products,
+                approved_promotions=promotions,
                 constraints=self._constraints(),
                 next_question=self._decision_question(profile, products),
                 direct_message=None,
                 must_recommend_now=True,
-                **self._sales_context(profile=profile, products=products, sales_decision=sales_decision),
+                **context,
             )
 
         intent = validation.semantic_turn.intent
@@ -115,9 +126,110 @@ class AnswerPlanService:
             profile=profile,
             recommended_products=recommended_products,
         )
-        response_type = "product_answer" if intent in {"general_product_question", "ask_reason"} else "acknowledgement"
-        direct_message = self._acknowledgement(profile) if response_type == "acknowledgement" else None
+        context = self._sales_context(profile=profile, products=products, sales_decision=sales_decision)
 
+        if intent == "ask_promotion" or sales_decision.stage == "promotion":
+            promotions = self._promotion_facts(profile=profile, products=products, context=context, force=True)
+            if promotions:
+                return AnswerPlan(
+                    response_type="promotion",
+                    customer_need_summary=self._need_summary(profile),
+                    products=[
+                        self._approved_product_fact(
+                            product,
+                            profile,
+                            presentation_role="主推款" if index == 0 else "备选款",
+                        )
+                        for index, product in enumerate(products)
+                    ],
+                    approved_promotions=promotions,
+                    constraints=self._constraints(),
+                    call_to_action=promotions[0].call_to_action,
+                    next_question=self._promotion_question(profile, promotions[0]),
+                    direct_message=None,
+                    **context,
+                )
+            return AnswerPlan(
+                response_type="promotion",
+                customer_need_summary=self._need_summary(profile),
+                products=[],
+                constraints=self._constraints(),
+                next_question=(
+                    "请先告诉我大概面积和当前更倾向的产品方向，我再按批准活动条件判断。"
+                    if profile.estimated_area_sqm is None
+                    else "您愿意先调整产品方向、房间范围，还是继续按当前方案核对正式报价？"
+                ),
+                direct_message=(
+                    "当前批准的演示活动中，没有一项能在现有信息下确认适用。"
+                    "我不会自行编造折扣或活动条件。"
+                ),
+                **context,
+            )
+
+        if intent in {"express_objection", "ask_reason"} or sales_decision.stage == "objection_handling":
+            objection_response = self._objection_response(profile=profile, products=products)
+            return AnswerPlan(
+                response_type="objection_response",
+                customer_need_summary=self._need_summary(profile),
+                products=[
+                    self._approved_product_fact(
+                        product,
+                        profile,
+                        presentation_role="主推款" if index == 0 else "备选款",
+                    )
+                    for index, product in enumerate(products)
+                ],
+                objection_response=objection_response,
+                constraints=self._constraints(),
+                call_to_action="我们可以保留核心需求，只调整一个维度重新比较。",
+                next_question=self._objection_question(profile),
+                direct_message=None,
+                **context,
+            )
+
+        if intent == "accept_recommendation" or sales_decision.stage in {"soft_close", "lead_capture", "follow_up"}:
+            ask_contact = sales_decision.stage == "lead_capture" and not profile.contact_opt_in
+            response_type = "lead_capture" if ask_contact else "soft_close"
+            if profile.contact_opt_in:
+                response_type = "soft_close"
+            return AnswerPlan(
+                response_type=response_type,
+                customer_need_summary=self._need_summary(profile),
+                products=[
+                    self._approved_product_fact(
+                        product,
+                        profile,
+                        presentation_role="主推款" if index == 0 else "备选款",
+                    )
+                    for index, product in enumerate(products)
+                ],
+                constraints=self._constraints(),
+                call_to_action=(
+                    "您可以点击页面上的“获取方案与后续联系”，自愿选择联系方式和授权范围。"
+                    if ask_contact
+                    else "下一步可以确认面积、样板、正式报价或到店安排。"
+                ),
+                ask_contact_consent=ask_contact,
+                contact_request_reason=(
+                    "用于发送本次主推与备选方案，并在您授权的范围内跟进报价、样板或到店安排。"
+                    if ask_contact
+                    else None
+                ),
+                next_question=(
+                    None
+                    if ask_contact or profile.contact_opt_in
+                    else self._decision_question(profile, products)
+                ),
+                direct_message=(
+                    "您的本次方案联系授权已经保存，我不会重复索取联系方式。门店会按您授权的用途和时间安排后续。"
+                    if profile.contact_opt_in
+                    else None
+                ),
+                **context,
+            )
+
+        response_type = "product_answer" if intent == "general_product_question" else "acknowledgement"
+        direct_message = self._acknowledgement(profile) if response_type == "acknowledgement" else None
         return AnswerPlan(
             response_type=response_type,
             customer_need_summary=self._need_summary(profile),
@@ -132,14 +244,15 @@ class AnswerPlanService:
             constraints=self._constraints(),
             next_question=None,
             direct_message=direct_message,
-            **self._sales_context(profile=profile, products=products, sales_decision=sales_decision),
+            **context,
         )
 
     def unavailable(self, *, provider_mode: str) -> AnswerPlan:
-        if provider_mode == "terra":
-            message = "云端智能服务暂时不可用。本次不会自动切换到本地模型，请稍后重试或重新开始并选择本地隐私模式。"
-        else:
-            message = "本地 Qwen 服务暂时不可用。请确认 Ollama 已启动并加载 qwen3.5:4b，然后再试一次。"
+        message = (
+            "云端智能服务暂时不可用。本次不会自动切换到本地模型，请稍后重试或重新开始并选择本地隐私模式。"
+            if provider_mode == "terra"
+            else "本地 Qwen 服务暂时不可用。请确认 Ollama 已启动并加载 qwen3.5:4b，然后再试一次。"
+        )
         return AnswerPlan(
             response_type="service_unavailable",
             sales_stage="discovery",
@@ -154,7 +267,11 @@ class AnswerPlanService:
 
     def fallback_text(self, answer_plan: AnswerPlan) -> str:
         if answer_plan.direct_message:
-            return answer_plan.direct_message
+            text = answer_plan.direct_message
+            if answer_plan.next_question:
+                text += answer_plan.next_question
+            return text
+
         if answer_plan.response_type in {"recommendation", "comparison"} and answer_plan.products:
             first = answer_plan.products[0]
             reason = "、".join(first.match_reasons[:3]) or "与您目前最重要的需求较匹配"
@@ -166,9 +283,36 @@ class AnswerPlanService:
             tradeoff = next((item for product in answer_plan.products for item in product.tradeoffs), None)
             if tradeoff:
                 text += f"需要提前说明的是，{tradeoff}。"
+            if answer_plan.approved_promotions:
+                text += answer_plan.approved_promotions[0].approved_message
             if answer_plan.next_question:
                 text += answer_plan.next_question
             return text
+
+        if answer_plan.response_type == "promotion":
+            if answer_plan.approved_promotions:
+                promotion = answer_plan.approved_promotions[0]
+                text = promotion.approved_message
+                if promotion.call_to_action:
+                    text += promotion.call_to_action
+                return text
+            return "当前没有可以确认适用的批准演示活动，我不会自行编造折扣或条件。"
+
+        if answer_plan.response_type == "objection_response":
+            text = "我理解您的顾虑。" + "".join(answer_plan.objection_response[:2])
+            tradeoff = next((item for product in answer_plan.products for item in product.tradeoffs), None)
+            if tradeoff:
+                text += f"需要同时考虑的是，{tradeoff}。"
+            if answer_plan.next_question:
+                text += answer_plan.next_question
+            return text
+
+        if answer_plan.response_type in {"soft_close", "lead_capture"}:
+            text = answer_plan.call_to_action or "下一步可以确认面积、样板和正式报价。"
+            if answer_plan.next_question:
+                text += answer_plan.next_question
+            return text
+
         if answer_plan.products:
             first = answer_plan.products[0]
             facts = "；".join(first.approved_facts[:2])
@@ -198,6 +342,37 @@ class AnswerPlanService:
             "featured_collections": [self._approved_collection_fact(item) for item in collections],
         }
 
+    def _promotion_facts(
+        self,
+        *,
+        profile: CustomerProfile,
+        products: list[FlooringProduct],
+        context: dict,
+        force: bool,
+    ) -> list[ApprovedPromotion]:
+        if not force and profile.estimated_area_sqm is None:
+            return []
+        collection_ids = [item.collection_id for item in context.get("featured_collections", [])]
+        promotions = self.promotion_service.eligible_promotions(
+            profile=profile,
+            products=products,
+            collection_ids=collection_ids,
+            limit=2,
+        )
+        return [self._approved_promotion(item) for item in promotions]
+
+    @staticmethod
+    def _approved_promotion(promotion: dict) -> ApprovedPromotion:
+        return ApprovedPromotion(
+            promotion_id=str(promotion.get("promotion_id") or "unknown"),
+            title=str(promotion.get("title") or "演示活动"),
+            approved_message=str(promotion.get("approved_message") or ""),
+            conditions=[str(item) for item in promotion.get("conditions", [])[:4]],
+            call_to_action=str(promotion.get("call_to_action") or "") or None,
+            area_status=str(promotion.get("area_status") or "not_required"),
+            simulated=bool(promotion.get("simulated", True)),
+        )
+
     @staticmethod
     def _approved_collection_fact(collection: dict) -> ApprovedCollectionFact:
         return ApprovedCollectionFact(
@@ -221,17 +396,21 @@ class AnswerPlanService:
             for product_id in validation.mentioned_product_ids
             if (product := self.product_service.get_product(product_id)) is not None
         ]
+        prior = [
+            product
+            for product_id in profile.recommended_product_ids
+            if (product := self.product_service.get_product(product_id)) is not None
+        ]
         if intent == "request_comparison":
-            return self._unique_products(mentioned or recommended_products)[:2]
-        if intent in {"general_product_question", "ask_reason"}:
-            if mentioned:
-                return self._unique_products(mentioned)[:2]
-            prior = [
-                product
-                for product_id in profile.recommended_product_ids
-                if (product := self.product_service.get_product(product_id)) is not None
-            ]
-            return self._unique_products(prior or recommended_products)[:2]
+            return self._unique_products(mentioned or recommended_products or prior)[:2]
+        if intent in {
+            "general_product_question",
+            "ask_reason",
+            "ask_promotion",
+            "express_objection",
+            "accept_recommendation",
+        }:
+            return self._unique_products(mentioned or prior or recommended_products)[:2]
         return []
 
     def _approved_product_fact(
@@ -325,8 +504,16 @@ class AnswerPlanService:
         summary: list[str] = []
         if profile.primary_purchase_driver:
             summary.append(f"首要购买驱动：{profile.primary_purchase_driver}")
+        if profile.project_type:
+            summary.append(f"项目类型：{profile.project_type}")
         if profile.room_type:
             summary.append(f"使用空间：{profile.room_type}")
+        if profile.estimated_area_sqm is not None:
+            summary.append(f"预计面积：{profile.estimated_area_sqm:g}㎡")
+        if profile.purchase_timeline:
+            summary.append(f"计划铺装：{profile.purchase_timeline}")
+        if profile.decision_stage:
+            summary.append(f"决策阶段：{profile.decision_stage}")
         if profile.style:
             summary.append(f"风格：{profile.style}")
         if profile.budget:
@@ -346,6 +533,8 @@ class AnswerPlanService:
             summary.append(f"{priority}优先级：{level}")
         if profile.preferred_colors:
             summary.append("颜色偏好：" + "、".join(profile.preferred_colors))
+        if profile.objections:
+            summary.append("当前顾虑：" + "、".join(profile.objections))
         return summary
 
     @staticmethod
@@ -359,39 +548,95 @@ class AnswerPlanService:
             known.append(f"{profile.budget}预算")
         if profile.style:
             known.append(profile.style)
+        if profile.estimated_area_sqm is not None:
+            known.append(f"约{profile.estimated_area_sqm:g}㎡")
+        if profile.purchase_timeline:
+            known.append(profile.purchase_timeline)
         if profile.preferred_colors:
             known.append("偏好" + "、".join(profile.preferred_colors))
-        prefix = "明白了，我已经抓住您关于" + "、".join(known) + "的重点。" if known else "好的，我先从您最重要的购买标准开始了解。"
+        prefix = (
+            "明白了，我已经抓住您关于" + "、".join(known) + "的重点。"
+            if known
+            else "好的，我先从您最重要的购买标准开始了解。"
+        )
         return prefix + (question or "")
 
     @staticmethod
     def _acknowledgement(profile: CustomerProfile) -> str:
         summary = AnswerPlanService._need_summary(profile)
-        if summary:
-            return "好的，我已经记录并整理为：" + "；".join(summary) + "。"
-        return "好的，我已经记录了您刚才确认的内容。"
+        return (
+            "好的，我已经记录并整理为：" + "；".join(summary) + "。"
+            if summary
+            else "好的，我已经记录了您刚才确认的内容。"
+        )
 
     @staticmethod
     def _decision_question(profile: CustomerProfile, products: list[FlooringProduct]) -> str | None:
+        if profile.estimated_area_sqm is None:
+            return "为了判断活动条件、报价范围和铺装工作量，请问预计铺装面积大约多少平方米？"
+        if not profile.purchase_timeline:
+            return "您计划什么时候铺装：1个月内、1到3个月、3个月以上，还是时间待定？"
         if len(products) >= 2:
             primary = products[0]
             backup = products[1]
             return (
                 f"在{primary.name}和{backup.name}这两个方向里，"
-                "您现在最重视的是核心性能、脚感、外观，还是预算上的平衡？"
+                "您现在更想保留核心性能，还是在脚感、外观或预算上做调整？"
             )
         if not profile.preferred_colors and not profile.rejected_colors:
             return "这个性能方向您是否认可？如果认可，我再帮您把颜色和整体风格收窄。"
         return "这个主推方向是否符合您的预期，还是有哪一点仍然让您犹豫？"
 
     @staticmethod
+    def _promotion_question(profile: CustomerProfile, promotion: ApprovedPromotion) -> str | None:
+        if promotion.area_status == "needs_area" and profile.estimated_area_sqm is None:
+            return "请告诉我大概面积，我才能确认是否达到这项演示活动的建议条件。"
+        return promotion.call_to_action
+
+    @staticmethod
+    def _objection_response(*, profile: CustomerProfile, products: list[FlooringProduct]) -> list[str]:
+        objections = profile.objections or ["需要进一步确认"]
+        messages: list[str] = []
+        for objection in objections[-2:]:
+            if objection == "价格顾虑":
+                messages.append("价格顾虑是合理的；我们应比较主推款解决的核心风险，以及备选款能节省预算时牺牲了什么。")
+            elif objection == "环保顾虑":
+                messages.append("环保问题必须以可核验的检测或认证资料为准；当前演示数据不足以支持额外环保承诺。")
+            elif objection == "防水顾虑":
+                messages.append("防水标记只能说明当前产品资料中的能力方向，最终仍需确认铺装边界、接缝和使用环境。")
+            elif objection == "维护顾虑":
+                messages.append("维护成本应结合水渍、宠物、清洁频率和材料脚感一起判断，不能只看一个参数。")
+            elif objection == "脚感顾虑":
+                messages.append("脚感与耐磨、防水和预算往往存在取舍，可以保留核心性能后再比较实木类备选。")
+            elif objection == "需要商量":
+                messages.append("可以先保留主推款与备选款的差异摘要，方便您和家人围绕同一组标准讨论。")
+            elif objection == "需要比较":
+                messages.append("比较时应固定空间和核心需求，只改变材质或预算一个变量，避免被无关参数干扰。")
+            elif objection == "颜色顾虑":
+                messages.append("颜色必须结合采光、墙面和家具确认；当前建议只用于收窄方向，不能替代现场样板。")
+        if not messages and products:
+            messages.append("我会把推荐依据和材料取舍分开说明，帮助您判断哪一点值得保留。")
+        return messages
+
+    @staticmethod
+    def _objection_question(profile: CustomerProfile) -> str:
+        if "价格顾虑" in profile.objections:
+            return "您更希望控制总预算，还是愿意为核心性能保留一定预算空间？"
+        if "需要商量" in profile.objections:
+            return "您和家人最可能分歧的是预算、颜色、脚感，还是材料性能？"
+        return "在目前的顾虑里，哪一点如果不能解决，您就不会继续考虑这个方案？"
+
+    @staticmethod
     def _constraints() -> list[str]:
         return [
-            "只能使用 approved_facts、match_reasons、tradeoffs、company_highlights 和 featured_collections 中的批准信息",
+            "只能使用批准的产品、系列、促销、匹配原因和取舍信息",
             "不得更换 Backend 选择的产品或主推款/备选款角色",
             "不得声称完全防水、零甲醛、免维护或提供未批准承诺",
             "不得虚构价格、库存、折扣、质保、认证、案例或安装日期",
+            "促销只能来自 approved_promotions，且必须保留演示数据和门店确认限定",
             "必须如实表达至少一个相关材料取舍，不得把所有产品描述为完美",
+            "联系方式只能通过独立表单收集，不得要求客户在聊天或语音中直接提供",
+            "本次方案联系授权与长期营销授权必须分开，不得默认营销授权",
             "products 为空时不得承诺稍后推荐",
         ]
 
