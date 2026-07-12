@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>门店销售工作台 · 木地板 AI 选购顾问</title>
+    <style>
+      :root { font-family: Inter,"Noto Sans SC","Microsoft YaHei",system-ui,sans-serif; color:#2f251f; background:#eee9e2; }
+      * { box-sizing: border-box; }
+      body { margin:0; min-height:100vh; background:linear-gradient(135deg,#f6f2ec,#ebe4dc); }
+      button,input,select,textarea { font:inherit; }
+      .shell { width:min(1240px,calc(100% - 28px)); margin:0 auto; padding:26px 0 60px; }
+      header { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; margin-bottom:20px; }
+      .brand { display:flex; gap:12px; align-items:center; }
+      .mark { display:grid; place-items:center; width:42px; height:42px; border-radius:14px; color:white; background:linear-gradient(145deg,#9b5d3d,#633424); }
+      h1 { margin:0; font-size:30px; }
+      header p { margin:5px 0 0; color:#75645a; }
+      .back { padding:9px 14px; border:1px solid rgba(94,69,55,.2); border-radius:999px; background:white; color:#604637; text-decoration:none; font-weight:750; }
+      .warning { margin-bottom:18px; padding:14px 16px; border:1px solid rgba(168,94,49,.25); border-radius:15px; background:#fff8e8; color:#73522f; line-height:1.6; }
+      .toolbar { display:flex; flex-wrap:wrap; align-items:end; gap:12px; padding:16px; border-radius:18px; background:rgba(255,255,255,.9); box-shadow:0 12px 34px rgba(65,47,37,.08); }
+      label { display:grid; gap:6px; color:#59483f; font-size:13px; font-weight:760; }
+      select,input,textarea { border:1px solid #d6c8be; border-radius:10px; padding:10px 11px; background:white; color:#31251f; }
+      button { min-height:42px; padding:9px 14px; border:1px solid rgba(91,65,50,.18); border-radius:11px; background:white; color:#604638; cursor:pointer; font-weight:780; }
+      button.primary { border:0; color:white; background:linear-gradient(135deg,#966043,#663927); }
+      button:disabled { opacity:.55; cursor:not-allowed; }
+      .metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:17px 0; }
+      .metric { padding:16px; border-radius:17px; background:rgba(255,255,255,.9); box-shadow:0 10px 26px rgba(65,47,37,.07); }
+      .metric span { display:block; color:#806e63; font-size:12px; }
+      .metric strong { display:block; margin-top:5px; font-size:28px; }
+      .status { display:none; margin:16px 0; padding:13px 15px; border-radius:13px; line-height:1.55; }
+      .status.visible { display:block; }
+      .status.info { background:#eee3d7; color:#684b39; }
+      .status.error { background:#fff0e9; color:#843c2b; }
+      .status.success { background:#edf5e9; color:#44643d; }
+      .lead-grid { display:grid; gap:14px; }
+      .lead-card { display:grid; grid-template-columns:minmax(240px,1fr) minmax(260px,1.2fr) minmax(280px,1.3fr); gap:16px; padding:18px; border:1px solid rgba(97,70,55,.13); border-radius:19px; background:rgba(255,255,255,.94); box-shadow:0 12px 30px rgba(64,45,34,.07); }
+      .lead-card h2 { margin:0 0 8px; font-size:19px; }
+      .chip-row { display:flex; flex-wrap:wrap; gap:7px; }
+      .chip { padding:5px 8px; border-radius:999px; background:#f0e7de; color:#694d3c; font-size:12px; font-weight:750; }
+      .chip.hot { background:#ffe3db; color:#913d2b; }
+      .chip.warm { background:#fff0cf; color:#85601f; }
+      .chip.cold { background:#e9eff3; color:#4b6271; }
+      .detail { display:grid; gap:6px; color:#66554b; font-size:14px; line-height:1.5; }
+      .detail strong { color:#403029; }
+      .follow-form { display:grid; gap:9px; }
+      .follow-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+      .empty { padding:40px; border-radius:20px; background:rgba(255,255,255,.85); color:#79685d; text-align:center; }
+      .due { border-color:rgba(178,77,50,.35); box-shadow:0 12px 34px rgba(153,63,40,.11); }
+      .due-label { color:#a14631; font-weight:800; }
+      @media(max-width:900px){ .metrics{grid-template-columns:1fr 1fr}.lead-card{grid-template-columns:1fr}.follow-row{grid-template-columns:1fr} }
+      @media(max-width:520px){ .metrics{grid-template-columns:1fr}header{flex-direction:column}.toolbar>*{width:100%} }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <div class="brand"><span class="mark">✦</span><div><h1>门店销售工作台</h1><p>本地线索、授权状态和三天跟进提醒</p></div></div>
+        <a class="back" href="/">返回导购</a>
+      </header>
+
+      <div class="warning">
+        当前为本机 Demo 工作台，没有账号登录和角色权限，不得暴露到公网。生产环境必须增加身份认证、权限控制、传输与数据库加密、访问审计和数据保留策略。
+      </div>
+
+      <section class="toolbar">
+        <label>查看范围
+          <select id="view-mode"><option value="all">全部有效线索</option><option value="due">已到期提醒</option></select>
+        </label>
+        <label>跟进状态
+          <select id="status-filter">
+            <option value="">全部状态</option><option>待发送方案</option><option>已发送方案</option><option>待报价</option><option>待回访</option><option>客户考虑中</option><option>已预约到店</option><option>已完成</option><option>已关闭</option>
+          </select>
+        </label>
+        <label>联系方式显示
+          <select id="contact-mode"><option value="masked">脱敏显示</option><option value="full">本机完整显示</option></select>
+        </label>
+        <button id="refresh" class="primary" type="button">刷新工作台</button>
+      </section>
+
+      <section class="metrics">
+        <div class="metric"><span>当前列表</span><strong id="metric-count">0</strong></div>
+        <div class="metric"><span>Hot 线索</span><strong id="metric-hot">0</strong></div>
+        <div class="metric"><span>已允许营销</span><strong id="metric-marketing">0</strong></div>
+        <div class="metric"><span>到期提醒</span><strong id="metric-due">0</strong></div>
+      </section>
+
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+      <section id="lead-grid" class="lead-grid"></section>
+    </main>
+
+    <script>
+      (() => {
+        const params = new URLSearchParams(location.search)
+        const API_BASE = (params.get('api') || 'http://127.0.0.1:8000').replace(/\/$/, '')
+        const viewMode = document.getElementById('view-mode')
+        const statusFilter = document.getElementById('status-filter')
+        const contactMode = document.getElementById('contact-mode')
+        const refresh = document.getElementById('refresh')
+        const grid = document.getElementById('lead-grid')
+        const statusBox = document.getElementById('status')
+        let busy = false
+
+        function setStatus(kind, message) { statusBox.className = `status visible ${kind}`; statusBox.textContent = message }
+        function esc(value) { return String(value ?? '').replace(/[&<>'"]/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch])) }
+        async function request(path, init = {}) {
+          const response = await fetch(`${API_BASE}${path}`, { ...init, headers: { 'Content-Type':'application/json; charset=utf-8', ...(init.headers || {}) } })
+          const text = await response.text(); let data = null
+          try { data = text ? JSON.parse(text) : null } catch { data = { detail:text } }
+          if (!response.ok) throw new Error(data?.detail || `${response.status} ${response.statusText}`)
+          return data
+        }
+        function isDue(lead) { return lead.next_follow_up_at && new Date(lead.next_follow_up_at).getTime() <= Date.now() && !['已完成','已关闭','已撤回'].includes(lead.follow_up_status) }
+        function localTime(value) { if (!value) return '未安排'; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString() }
+        function updateMetrics(leads) {
+          document.getElementById('metric-count').textContent = leads.length
+          document.getElementById('metric-hot').textContent = leads.filter((lead) => lead.lead_temperature === 'hot').length
+          document.getElementById('metric-marketing').textContent = leads.filter((lead) => lead.marketing_opt_in).length
+          document.getElementById('metric-due').textContent = leads.filter(isDue).length
+        }
+        function render(leads) {
+          updateMetrics(leads)
+          if (!leads.length) { grid.innerHTML = '<div class="empty">当前筛选条件下没有销售线索。</div>'; return }
+          grid.innerHTML = leads.map((lead) => {
+            const contact = contactMode.value === 'full' ? (lead.contact_value || lead.contact_masked) : lead.contact_masked
+            const due = isDue(lead)
+            const purposes = (lead.contact_purposes || []).map((item) => `<span class="chip">${esc(item)}</span>`).join('')
+            const promotions = (lead.promotion_ids || []).map((item) => `<span class="chip">${esc(item)}</span>`).join('') || '<span class="chip">未记录活动</span>'
+            return `<article class="lead-card ${due ? 'due' : ''}" data-lead-id="${esc(lead.lead_id)}">
+              <section><h2>${esc(lead.display_name || '未填写称呼')}</h2><div class="chip-row"><span class="chip ${esc(lead.lead_temperature)}">${esc(lead.lead_temperature)}</span><span class="chip">${esc(lead.sales_stage)}</span><span class="chip">${esc(lead.follow_up_status)}</span></div>${due ? '<p class="due-label">跟进提醒已到期</p>' : ''}</section>
+              <section class="detail">
+                <div><strong>联系方式：</strong>${esc(lead.contact_channel)} · ${esc(contact)}</div>
+                <div><strong>本次联系授权：</strong>${lead.contact_opt_in ? '已同意' : '已撤回'}</div>
+                <div><strong>营销授权：</strong>${lead.marketing_opt_in ? '已同意' : '未同意'}</div>
+                <div><strong>方便联系：</strong>${esc(lead.preferred_contact_time || '未指定')}</div>
+                <div><strong>下次跟进：</strong>${esc(localTime(lead.next_follow_up_at))}</div>
+                <div class="chip-row">${purposes}</div><div class="chip-row">${promotions}</div>
+              </section>
+              <form class="follow-form">
+                <div class="follow-row"><select name="status"><option>待发送方案</option><option>已发送方案</option><option>待报价</option><option>待回访</option><option>客户考虑中</option><option>已预约到店</option><option>已完成</option><option>已关闭</option></select><input name="next" type="datetime-local" /></div>
+                <textarea name="note" rows="2" maxlength="1000" placeholder="跟进备注，例如：已发送样板图，三天后确认"></textarea>
+                <button class="primary" type="submit">保存跟进结果</button>
+              </form>
+            </article>`
+          }).join('')
+          for (const card of grid.querySelectorAll('.lead-card')) {
+            const select = card.querySelector('select[name="status"]')
+            const lead = leads.find((item) => item.lead_id === card.dataset.leadId)
+            if (lead) select.value = lead.follow_up_status
+            card.querySelector('form').addEventListener('submit', async (event) => {
+              event.preventDefault(); if (busy) return; busy = true
+              const status = select.value
+              const rawNext = card.querySelector('input[name="next"]').value
+              const note = card.querySelector('textarea[name="note"]').value.trim()
+              try {
+                await request('/api/crm/leads/follow-up', { method:'POST', body:JSON.stringify({ lead_id:card.dataset.leadId, status, note, next_follow_up_at:rawNext ? new Date(rawNext).toISOString() : null }) })
+                setStatus('success','跟进状态已保存。'); await load()
+              } catch (error) { setStatus('error',`保存失败：${error.message}`) } finally { busy = false }
+            })
+          }
+        }
+        async function load() {
+          refresh.disabled = true; setStatus('info','正在读取本地 CRM…')
+          try {
+            const include = contactMode.value === 'full'
+            const status = statusFilter.value
+            const path = viewMode.value === 'due'
+              ? `/api/crm/reminders/due?include_contact=${include}&limit=200`
+              : `/api/crm/leads?include_contact=${include}&limit=200${status ? `&status=${encodeURIComponent(status)}` : ''}`
+            const result = await request(path)
+            render(result.leads || [])
+            setStatus('success',`已读取 ${result.count || 0} 条本地线索。`)
+          } catch (error) { grid.innerHTML=''; setStatus('error',`读取失败：${error.message}`) } finally { refresh.disabled = false }
+        }
+        refresh.addEventListener('click', () => void load())
+        viewMode.addEventListener('change', () => void load())
+        statusFilter.addEventListener('change', () => void load())
+        contactMode.addEventListener('change', () => void load())
+        void load()
+      })()
+    </script>
+  </body>
+</html>
