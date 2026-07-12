@@ -10,6 +10,9 @@ IntentName = Literal[
     "request_recommendation",
     "request_comparison",
     "ask_reason",
+    "ask_promotion",
+    "express_objection",
+    "accept_recommendation",
     "reject_product",
     "reject_color",
     "general_product_question",
@@ -37,15 +40,35 @@ SalesStage = Literal[
     "qualification",
     "recommendation",
     "objection_handling",
+    "promotion",
+    "soft_close",
+    "lead_capture",
+    "follow_up",
 ]
 SalesNextBestAction = Literal[
     "introduce_company",
     "ask_primary_priority",
     "ask_usage_context",
+    "ask_project_area",
+    "ask_purchase_timeline",
     "qualify_needs",
     "present_main_and_backup",
     "explain_tradeoff",
+    "mention_approved_promotion",
+    "soft_close",
+    "offer_contact_form",
+    "prepare_follow_up",
     "clarify_customer_input",
+]
+PendingSlotName = Literal[
+    "room_type",
+    "budget",
+    "style",
+    "preferred_color",
+    "priority",
+    "estimated_area_sqm",
+    "purchase_timeline",
+    "project_type",
 ]
 
 
@@ -97,7 +120,7 @@ class ValidationResult(BaseModel):
 class DialogueDecision(BaseModel):
     action: DecisionAction
     reason: str
-    pending_slot: Literal["room_type", "budget", "style", "preferred_color", "priority"] | None = None
+    pending_slot: PendingSlotName | None = None
     question: str | None = None
 
 
@@ -128,11 +151,25 @@ class ApprovedProductFact(BaseModel):
     tradeoffs: list[str] = Field(default_factory=list)
 
 
+class ApprovedPromotion(BaseModel):
+    promotion_id: str
+    title: str
+    approved_message: str
+    conditions: list[str] = Field(default_factory=list)
+    call_to_action: str | None = None
+    area_status: Literal["not_required", "needs_area", "eligible"] | str = "not_required"
+    simulated: bool = True
+
+
 class AnswerPlan(BaseModel):
     response_type: Literal[
         "recommendation",
         "comparison",
         "product_answer",
+        "promotion",
+        "objection_response",
+        "soft_close",
+        "lead_capture",
         "clarification",
         "acknowledgement",
         "service_unavailable",
@@ -144,7 +181,12 @@ class AnswerPlan(BaseModel):
     featured_collections: list[ApprovedCollectionFact] = Field(default_factory=list)
     customer_need_summary: list[str] = Field(default_factory=list)
     products: list[ApprovedProductFact] = Field(default_factory=list)
+    approved_promotions: list[ApprovedPromotion] = Field(default_factory=list)
+    objection_response: list[str] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
+    call_to_action: str | None = None
+    ask_contact_consent: bool = False
+    contact_request_reason: str | None = None
     next_question: str | None = None
     direct_message: str | None = None
     must_recommend_now: bool = False
@@ -162,6 +204,9 @@ SEMANTIC_TURN_JSON_SCHEMA: dict = {
                 "request_recommendation",
                 "request_comparison",
                 "ask_reason",
+                "ask_promotion",
+                "express_objection",
+                "accept_recommendation",
                 "reject_product",
                 "reject_color",
                 "general_product_question",
