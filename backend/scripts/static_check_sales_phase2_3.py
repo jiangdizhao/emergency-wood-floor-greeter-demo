@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -153,7 +154,10 @@ def main() -> None:
         repository = CRMRepository(database_path)
         # Simulate a lead captured before optional face enrollment. The later
         # conversation-session binding must still make it deletable by customer.
-        with repository._connect() as connection:
+        # sqlite3.Connection.__exit__ commits or rolls back, but it does not close
+        # the Windows file handle. closing(...) guarantees cleanup before the
+        # TemporaryDirectory is removed.
+        with closing(repository._connect()) as connection, connection:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS conversation_sessions(
