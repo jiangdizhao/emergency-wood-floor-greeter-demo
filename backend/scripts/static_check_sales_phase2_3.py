@@ -272,10 +272,13 @@ def main() -> None:
         assert repository.get_by_session("phase23-static-session", include_inactive=True) is None
 
     # Import the complete FastAPI application last, so schema and route wiring are
-    # checked without opening the camera or calling Terra/Qwen.
+    # checked without opening the camera or calling Terra/Qwen. OpenAPI is the
+    # stable public representation; app.routes may contain framework-internal
+    # wrapper objects that do not expose a direct .path attribute.
     from app.main import app
 
-    route_paths = {route.path for route in app.routes}
+    openapi_paths = app.openapi().get("paths", {})
+    route_paths = set(openapi_paths.keys())
     expected_routes = {
         "/api/sales/catalog",
         "/api/promotions/active",
