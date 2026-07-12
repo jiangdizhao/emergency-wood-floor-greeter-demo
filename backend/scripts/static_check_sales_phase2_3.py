@@ -19,6 +19,7 @@ from app.llm.prompts import build_parse_user_prompt
 from app.llm.schemas import DialogueDecision, SalesDecision, SemanticTurn, ValidationResult
 from app.models import CustomerProfile
 from app.services.answer_plan_service import AnswerPlanService
+from app.services.crm_identity_bridge import CRMIdentityBridge
 from app.services.crm_repository import CRMRepository
 from app.services.product_service import ProductService
 from app.services.promotion_service import PromotionService
@@ -141,6 +142,22 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="woodfloor-crm-") as temporary_directory:
         database_path = Path(temporary_directory) / "crm-test.db"
         repository = CRMRepository(database_path)
+        # Simulate a lead captured before optional face enrollment. The later
+        # conversation-session binding must still make it deletable by customer.
+        with repository._connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS conversation_sessions(
+                    session_id TEXT PRIMARY KEY,
+                    customer_id TEXT
+                )
+                """
+            )
+            connection.execute(
+                "INSERT INTO conversation_sessions(session_id, customer_id) VALUES (?, ?)",
+                ("phase23-static-session", "customer-static"),
+            )
+
         lead = repository.upsert_lead(
             session_id="phase23-static-session",
             customer_id=None,
@@ -192,8 +209,28 @@ def main() -> None:
         assert revoked["active"] is False
         assert revoked["contact_opt_in"] is False
 
-        assert repository.delete_by_session("phase23-static-session") is True
+        bridge = CRMIdentityBridge(repository)
+        assert bridge.delete_customer_records(customer_id="customer-static") == 1
         assert repository.get_by_session("phase23-static-session", include_inactive=True) is None
+
+    # Import the complete FastAPI application last, so schema and route wiring are
+    # checked without opening the camera or calling Terra/Qwen.
+    from app.main import app
+
+    route_paths = {route.path for route in app.routes}
+    expected_routes = {
+        "/api/sales/catalog",
+        "/api/promotions/active",
+        "/api/leads/contact",
+        "/api/leads/contact/status",
+        "/api/leads/contact/consent",
+        "/api/crm/status",
+        "/api/crm/leads",
+        "/api/crm/reminders/due",
+        "/api/crm/leads/follow-up",
+    }
+    missing_routes = expected_routes.difference(route_paths)
+    assert not missing_routes, f"Missing sales/CRM routes: {sorted(missing_routes)}"
 
     print("Sales phase-two/three static check passed.")
     print("Approved promotion: " + plan.approved_promotions[0].title)
@@ -201,7 +238,8 @@ def main() -> None:
     print("Contact PII excluded from LLM prompt: yes")
     print("Separate contact and marketing consent: yes")
     print("Three-day local follow-up reminder: yes")
-    print("Consent revocation and permanent CRM deletion: yes")
+    print("Identity-linked CRM deletion: yes")
+    print("FastAPI sales/CRM routes registered: yes")
 
 
 if __name__ == "__main__":
