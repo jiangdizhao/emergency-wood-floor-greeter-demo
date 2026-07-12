@@ -9,6 +9,9 @@ from .product_service import ProductService
 
 ROOM_VALUES = {"客厅", "卧室", "全屋", "厨房", "书房", "儿童房", "老人房"}
 BUDGET_VALUES = {"经济", "中等", "偏高", "高端"}
+PROJECT_TYPE_VALUES = {"新房装修", "旧房翻新", "局部改造", "出租房", "自住"}
+TIMELINE_VALUES = {"立即", "1个月内", "1-3个月", "3个月以上", "待定"}
+DECISION_STAGE_VALUES = {"初步了解", "正在比较", "准备购买", "等待家人决定"}
 BOOLEAN_FIELDS = {
     "has_pets",
     "has_floor_heating",
@@ -16,7 +19,16 @@ BOOLEAN_FIELDS = {
     "has_elderly",
     "humid_environment",
 }
-FIELD_NAMES = {"room_type", "style", "budget", *BOOLEAN_FIELDS}
+FIELD_NAMES = {
+    "room_type",
+    "style",
+    "budget",
+    "project_type",
+    "estimated_area_sqm",
+    "purchase_timeline",
+    "decision_stage",
+    *BOOLEAN_FIELDS,
+}
 PRIORITIES = {"防水", "耐磨", "环保", "价格", "脚感", "好清洁"}
 SELF_MARKERS = ("我", "我们", "我家", "我们家", "家里", "家中", "自己家", "我的")
 NEGATIVE_MARKERS = ("没有", "没", "不", "无", "未", "不是", "别", "不要")
@@ -35,6 +47,26 @@ BUDGET_PATTERNS = {
     "中等": ("中等", "中档", "适中", "普通预算", "不要太贵"),
     "偏高": ("偏高", "高一点", "往上提一档", "预算可以高", "品质优先"),
     "高端": ("高端", "不差钱", "顶配", "豪华"),
+}
+PROJECT_TYPE_PATTERNS = {
+    "新房装修": ("新房装修", "新房", "新家装修"),
+    "旧房翻新": ("旧房翻新", "旧房", "老房翻新", "重新装修"),
+    "局部改造": ("局部改造", "局部翻新", "只换一个房间"),
+    "出租房": ("出租房", "出租用", "投资房"),
+    "自住": ("自住", "自己住", "长期住"),
+}
+TIMELINE_PATTERNS = {
+    "立即": ("马上", "立即", "现在就", "尽快"),
+    "1个月内": ("一个月内", "1个月内", "这个月", "近期"),
+    "1-3个月": ("一到三个月", "1到3个月", "1-3个月", "三个月内"),
+    "3个月以上": ("三个月以后", "3个月以上", "半年后", "明年"),
+    "待定": ("时间没定", "还没定时间", "待定", "以后再说"),
+}
+DECISION_STAGE_PATTERNS = {
+    "初步了解": ("先了解", "随便看看", "初步了解"),
+    "正在比较": ("正在比较", "对比几家", "看看别家", "多比较"),
+    "准备购买": ("准备买", "准备下单", "可以定", "要报价", "想订"),
+    "等待家人决定": ("和家人商量", "等家人决定", "回去商量"),
 }
 BOOLEAN_CLAIMS = {
     "has_pets": {
@@ -100,6 +132,20 @@ RECOMMENDATION_MARKERS = (
     "直接给个",
     "适合的方案",
 )
+PROMOTION_MARKERS = ("优惠", "促销", "折扣", "活动", "便宜多少")
+ACCEPT_MARKERS = ("认可", "可以", "就这个", "准备买", "准备下单", "要报价", "想订")
+OBJECTION_MARKERS = (
+    "太贵",
+    "超预算",
+    "再考虑",
+    "回去商量",
+    "看看别家",
+    "真的防水",
+    "甲醛",
+    "难打理",
+    "脚感不好",
+    "颜色不喜欢",
+)
 
 
 @dataclass(frozen=True)
@@ -157,9 +203,7 @@ class ValidationGuard:
             if previous_value is not None and previous_value != validated.value:
                 conflicts.append(f"conflicting action for {validated.kind}:{validated.name}")
                 accepted = [
-                    item
-                    for item in accepted
-                    if (item.kind, item.name) != conflict_key
+                    item for item in accepted if (item.kind, item.name) != conflict_key
                 ]
                 continue
             seen_updates[conflict_key] = validated.value
@@ -217,9 +261,7 @@ class ValidationGuard:
             "request_comparison",
         }
         if semantic_turn.recommendation_requested != expected_recommendation:
-            warnings.append(
-                "recommendation_requested did not match intent and was normalized by backend"
-            )
+            warnings.append("recommendation_requested did not match intent and was normalized by backend")
 
         semantic_turn = semantic_turn.model_copy(
             update={
@@ -234,15 +276,11 @@ class ValidationGuard:
         if semantic_turn.intent == "reject_product" and not any(
             action.kind == "reject_product" for action in accepted
         ):
-            missing_claims.append(
-                "reject_product intent requires a validated reject_product action"
-            )
+            missing_claims.append("reject_product intent requires a validated reject_product action")
         if semantic_turn.intent == "reject_color" and not any(
             action.kind == "reject_color" for action in accepted
         ):
-            missing_claims.append(
-                "reject_color intent requires a validated reject_color action"
-            )
+            missing_claims.append("reject_color intent requires a validated reject_color action")
 
         if semantic_turn.uncertain:
             warnings.append("provider marked the parse as uncertain")
@@ -296,17 +334,41 @@ class ValidationGuard:
         text: str,
         semantic_turn: SemanticTurn,
     ) -> SemanticTurn:
+        if any(marker in text for marker in PROMOTION_MARKERS):
+            return semantic_turn.model_copy(
+                update={
+                    "intent": "ask_promotion",
+                    "recommendation_requested": False,
+                    "uncertain": False,
+                    "confidence": max(semantic_turn.confidence, 0.92),
+                }
+            )
         if any(marker in text for marker in RECOMMENDATION_MARKERS):
-            if "对比" in text or "比较" in text or "差别" in text:
-                intent = "request_comparison"
-            else:
-                intent = "request_recommendation"
+            intent = "request_comparison" if any(marker in text for marker in ("对比", "比较", "差别")) else "request_recommendation"
             return semantic_turn.model_copy(
                 update={
                     "intent": intent,
                     "recommendation_requested": True,
                     "uncertain": False,
                     "confidence": max(semantic_turn.confidence, 0.90),
+                }
+            )
+        if any(marker in text for marker in OBJECTION_MARKERS):
+            return semantic_turn.model_copy(
+                update={
+                    "intent": "express_objection",
+                    "recommendation_requested": False,
+                    "uncertain": False,
+                    "confidence": max(semantic_turn.confidence, 0.88),
+                }
+            )
+        if any(marker in text for marker in ACCEPT_MARKERS):
+            return semantic_turn.model_copy(
+                update={
+                    "intent": "accept_recommendation",
+                    "recommendation_requested": False,
+                    "uncertain": False,
+                    "confidence": max(semantic_turn.confidence, 0.85),
                 }
             )
         return semantic_turn
@@ -324,44 +386,40 @@ class ValidationGuard:
         if pending_slot == "room_type":
             if any(action.kind == "set_field" and action.name == "room_type" for action in existing):
                 return None
-            for room, patterns in ROOM_PATTERNS.items():
-                evidence = next((pattern for pattern in patterns if pattern in text), None)
-                if evidence:
-                    return ValidatedAction(
-                        kind="set_field",
-                        name="room_type",
-                        value=room,
-                        evidence=evidence,
-                        scope="persistent",
-                    )
+            return self._recover_pattern_field(text, "room_type", ROOM_PATTERNS)
 
         if pending_slot == "budget":
             if any(action.kind == "set_field" and action.name == "budget" for action in existing):
                 return None
-            for budget, patterns in BUDGET_PATTERNS.items():
-                evidence = next((pattern for pattern in patterns if pattern in text), None)
-                if evidence:
-                    return ValidatedAction(
-                        kind="set_field",
-                        name="budget",
-                        value=budget,
-                        evidence=evidence,
-                        scope="persistent",
-                    )
+            return self._recover_pattern_field(text, "budget", BUDGET_PATTERNS)
 
         if pending_slot == "style":
             if any(action.kind == "set_field" and action.name == "style" for action in existing):
                 return None
-            for style, patterns in STYLE_PATTERNS.items():
-                evidence = next((pattern for pattern in patterns if pattern in text), None)
-                if evidence:
-                    return ValidatedAction(
-                        kind="set_field",
-                        name="style",
-                        value=style,
-                        evidence=evidence,
-                        scope="persistent",
-                    )
+            return self._recover_pattern_field(text, "style", STYLE_PATTERNS)
+
+        if pending_slot == "project_type":
+            if any(action.kind == "set_field" and action.name == "project_type" for action in existing):
+                return None
+            return self._recover_pattern_field(text, "project_type", PROJECT_TYPE_PATTERNS)
+
+        if pending_slot == "purchase_timeline":
+            if any(action.kind == "set_field" and action.name == "purchase_timeline" for action in existing):
+                return None
+            return self._recover_pattern_field(text, "purchase_timeline", TIMELINE_PATTERNS)
+
+        if pending_slot == "estimated_area_sqm":
+            if any(action.kind == "set_field" and action.name == "estimated_area_sqm" for action in existing):
+                return None
+            area = self._parse_area_from_text(text)
+            if area is not None:
+                return ValidatedAction(
+                    kind="set_field",
+                    name="estimated_area_sqm",
+                    value=self._format_number(area),
+                    evidence=text,
+                    scope="persistent",
+                )
 
         if pending_slot == "preferred_color":
             if any(action.kind in {"prefer_color", "reject_color"} for action in existing):
@@ -392,6 +450,24 @@ class ValidationGuard:
                     )
         return None
 
+    @staticmethod
+    def _recover_pattern_field(
+        text: str,
+        field_name: str,
+        patterns: dict[str, tuple[str, ...]],
+    ) -> ValidatedAction | None:
+        for value, aliases in patterns.items():
+            evidence = next((alias for alias in aliases if alias in text), None)
+            if evidence:
+                return ValidatedAction(
+                    kind="set_field",
+                    name=field_name,
+                    value=value,
+                    evidence=evidence,
+                    scope="persistent",
+                )
+        return None
+
     def _validate_action(
         self,
         *,
@@ -415,6 +491,20 @@ class ValidationGuard:
                 return None, f"invalid room value: {value}"
             if name == "budget" and value not in BUDGET_VALUES:
                 return None, f"invalid budget value: {value}"
+            if name == "project_type" and value not in PROJECT_TYPE_VALUES:
+                return None, f"invalid project type: {value}"
+            if name == "purchase_timeline" and value not in TIMELINE_VALUES:
+                return None, f"invalid purchase timeline: {value}"
+            if name == "decision_stage" and value not in DECISION_STAGE_VALUES:
+                return None, f"invalid decision stage: {value}"
+            if name == "estimated_area_sqm":
+                try:
+                    area = float(value)
+                except ValueError:
+                    return None, f"invalid area value: {value}"
+                if not 1 <= area <= 10000:
+                    return None, f"area outside supported range: {value}"
+                value = self._format_number(area)
             if name in BOOLEAN_FIELDS:
                 if value not in {"yes", "no"}:
                     return None, f"invalid boolean value for {name}: {value}"
@@ -472,6 +562,21 @@ class ValidationGuard:
             if any(pattern in text for pattern in patterns):
                 claims.add(Claim("field", "style", style))
                 break
+        for project_type, patterns in PROJECT_TYPE_PATTERNS.items():
+            if any(pattern in text for pattern in patterns):
+                claims.add(Claim("field", "project_type", project_type))
+                break
+        for timeline, patterns in TIMELINE_PATTERNS.items():
+            if any(pattern in text for pattern in patterns):
+                claims.add(Claim("field", "purchase_timeline", timeline))
+                break
+        for decision_stage, patterns in DECISION_STAGE_PATTERNS.items():
+            if any(pattern in text for pattern in patterns):
+                claims.add(Claim("field", "decision_stage", decision_stage))
+                break
+        area = self._parse_area_from_text(text)
+        if area is not None:
+            claims.add(Claim("field", "estimated_area_sqm", self._format_number(area)))
         for field_name, value_patterns in BOOLEAN_CLAIMS.items():
             if any(pattern in text for pattern in value_patterns["no"]):
                 claims.add(Claim("field", field_name, "no"))
@@ -528,11 +633,12 @@ class ValidationGuard:
             "provide_or_modify_needs",
             "reject_product",
             "reject_color",
+            "express_objection",
+            "accept_recommendation",
+            "ask_promotion",
         }:
             return True
-        return semantic_turn.explicit_self_context or any(
-            marker in text for marker in SELF_MARKERS
-        )
+        return semantic_turn.explicit_self_context or any(marker in text for marker in SELF_MARKERS)
 
     @staticmethod
     def _canonical_field_value(field_name: str, value: str) -> str:
@@ -571,6 +677,29 @@ class ValidationGuard:
             for style, patterns in STYLE_PATTERNS.items():
                 if style in value or any(pattern in value for pattern in patterns):
                     return style
+        if field_name == "project_type":
+            for item, patterns in PROJECT_TYPE_PATTERNS.items():
+                if item in value or any(pattern in value for pattern in patterns):
+                    return item
+        if field_name == "purchase_timeline":
+            timeline_mapping = {
+                "within1month": "1个月内",
+                "1month": "1个月内",
+                "1-3months": "1-3个月",
+                "over3months": "3个月以上",
+                "unknown": "待定",
+            }
+            if lower in timeline_mapping:
+                return timeline_mapping[lower]
+            for item, patterns in TIMELINE_PATTERNS.items():
+                if item in value or any(pattern in value for pattern in patterns):
+                    return item
+        if field_name == "decision_stage":
+            for item, patterns in DECISION_STAGE_PATTERNS.items():
+                if item in value or any(pattern in value for pattern in patterns):
+                    return item
+        if field_name == "estimated_area_sqm":
+            return value.replace("平方米", "").replace("平米", "").replace("㎡", "").replace("平", "")
         for room in ROOM_VALUES:
             if room in value:
                 return room
@@ -626,6 +755,46 @@ class ValidationGuard:
         return output
 
     @staticmethod
+    def _parse_area_from_text(text: str) -> float | None:
+        digit_match = re.search(r"(\d+(?:\.\d+)?)(?:平方米|平米|㎡|平)", text)
+        if digit_match:
+            return float(digit_match.group(1))
+        if re.fullmatch(r"\d+(?:\.\d+)?", text):
+            return float(text)
+
+        chinese_match = re.search(r"([一二两三四五六七八九十百]+)(?:平方米|平米|㎡|平)", text)
+        if not chinese_match:
+            chinese_match = re.fullmatch(r"([一二两三四五六七八九十百]+)", text)
+        if not chinese_match:
+            return None
+        return ValidationGuard._chinese_number(chinese_match.group(1))
+
+    @staticmethod
+    def _chinese_number(value: str) -> float | None:
+        digits = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+        if value in digits:
+            return float(digits[value])
+        total = 0
+        current = 0
+        for char in value:
+            if char in digits:
+                current = digits[char]
+            elif char == "十":
+                total += (current or 1) * 10
+                current = 0
+            elif char == "百":
+                total += (current or 1) * 100
+                current = 0
+            else:
+                return None
+        total += current
+        return float(total) if total > 0 else None
+
+    @staticmethod
+    def _format_number(value: float) -> str:
+        return str(int(value)) if float(value).is_integer() else f"{value:.2f}".rstrip("0").rstrip(".")
+
+    @staticmethod
     def _unique(values: Iterable[str]) -> list[str]:
         output: list[str] = []
         for value in values:
@@ -647,6 +816,9 @@ class ValidationGuard:
             "style": "我没有听清风格。请只回答：现代简约、北欧原木、新中式或其他风格。",
             "preferred_color": "我没有听清颜色。请只回答：浅灰色、原木色或深色系。",
             "priority": "我没有听清重点。请只回答：防水、耐磨、环保、价格、脚感或好清洁。",
+            "project_type": "我没有听清项目类型。请回答：新房装修、旧房翻新、局部改造、出租房或自住。",
+            "estimated_area_sqm": "我没有听清面积。请直接说大概多少平方米，例如：80 平方米。",
+            "purchase_timeline": "我没有听清铺装时间。请回答：立即、1个月内、1到3个月、3个月以上或待定。",
         }
         if pending_slot in pending_questions:
             return pending_questions[pending_slot]
@@ -660,6 +832,8 @@ class ValidationGuard:
                 return "我没有完全确认宠物条件。请问您家目前有养猫或养狗吗？"
             if "priority" in first:
                 return "我可能漏掉了您最关注的性能。请确认您最重视防水、耐磨、环保、价格、脚感还是好清洁？"
+            if "estimated_area_sqm" in first:
+                return "我可能没有正确记录面积。请直接说大概多少平方米。"
             if "comparison" in first:
                 return "请再告诉我您想比较的两个产品或材质，例如 SPC 和多层实木。"
         if rejected:
