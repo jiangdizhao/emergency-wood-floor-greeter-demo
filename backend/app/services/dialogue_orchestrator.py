@@ -15,6 +15,7 @@ from .dialogue_policy import DialoguePolicy
 from .lead_service import LeadService
 from .recommendation_service import RecommendationService
 from .sales_conversation_policy import SalesConversationPolicy
+from .sales_signals_service import SalesSignalsService
 from .session_runtime_service import SessionRuntimeService
 from .state_machine import StoreSessionStateMachine
 from .validation_guard import ValidationGuard
@@ -30,6 +31,7 @@ EMPTY_COMMITMENT_PATTERNS = (
     "随后为您推荐",
     "我将为您推荐",
 )
+PROMOTION_WORDS = ("折扣", "优惠", "促销", "活动", "赠送", "立减")
 
 
 class DialogueOrchestrator:
@@ -58,6 +60,7 @@ class DialogueOrchestrator:
         self.context_service = DialogueContextService()
         self.dialogue_policy = DialoguePolicy()
         self.sales_policy = SalesConversationPolicy()
+        self.sales_signals = SalesSignalsService()
 
     def handle_turn(self, request: ChatRequest) -> ChatResponse:
         provider_mode = self._resolve_provider(request.session_id, request.provider_mode)
@@ -72,16 +75,19 @@ class DialogueOrchestrator:
             answer = (
                 "Thanks for visiting. The sales team can continue follow-up based on this requirement record."
                 if lang == "en"
-                else "好的，感谢您的咨询。我已经整理好本次核心需求和推荐方向，门店顾问后续可以据此继续确认面积、报价与安装安排。"
+                else (
+                    "好的，感谢您的咨询。我已经整理好本次核心需求、主推方向和待确认事项。"
+                    + (
+                        "您可以点击“获取方案与后续联系”，自愿选择是否接收本次方案。"
+                        if profile.contact_prompt_eligible and not profile.contact_opt_in
+                        else "门店顾问可以据此继续确认面积、报价与安装安排。"
+                    )
+                )
             )
-            follow_up = (
-                "Sales should follow up within 24 hours to confirm area, budget, and installation schedule."
-                if lang == "en"
-                else "建议销售在 24 小时内发送主推款与备选款对比，并确认房间面积、最终预算和安装时间。"
-            )
+            follow_up = self.customer_state_service.build_follow_up(profile)
             return ChatResponse(
                 answer=answer,
-                recommended_products=[],
+                recommended_products=self._saved_recommendations(profile),
                 customer_profile=profile,
                 follow_up_suggestion=follow_up,
                 state=self.state_machine.state,
@@ -91,6 +97,12 @@ class DialogueOrchestrator:
                 last_assistant_question=context.last_assistant_question,
                 sales_stage=profile.sales_stage,
                 sales_objective=profile.sales_objective,
+                should_offer_contact=profile.contact_prompt_eligible and not profile.contact_opt_in,
+                contact_offer_reason=(
+                    "用于发送本次方案并在客户授权范围内跟进。"
+                    if profile.contact_prompt_eligible and not profile.contact_opt_in
+                    else None
+                ),
             )
 
         if self.state_machine.state.value not in {"CONVERSATION_ACTIVE", "INTRODUCING_PRODUCTS"}:
@@ -177,6 +189,11 @@ class DialogueOrchestrator:
         validation_ms = (time.perf_counter() - validation_started) * 1000
 
         updated_profile = self.customer_state_service.apply(profile=profile, validation=validation)
+        updated_profile = self.sales_signals.update(
+            profile=updated_profile,
+            user_text=request.text,
+            intent=validation.semantic_turn.intent,
+        )
         decision = self.dialogue_policy.decide(
             validation=validation,
             profile=updated_profile,
@@ -246,12 +263,20 @@ class DialogueOrchestrator:
 
         if answer_plan.products:
             updated_profile.recommended_product_ids = [product.product_id for product in answer_plan.products]
+        for promotion in answer_plan.approved_promotions:
+            if promotion.promotion_id not in updated_profile.promotion_ids_presented:
+                updated_profile.promotion_ids_presented.append(promotion.promotion_id)
         updated_profile.primary_purchase_driver = updated_profile.primary_purchase_driver or self._primary_driver(updated_profile)
         updated_profile.sales_stage = answer_plan.sales_stage
         updated_profile.sales_objective = answer_plan.sales_objective
         updated_profile.featured_collection_ids = [
             collection.collection_id for collection in answer_plan.featured_collections
         ]
+        updated_profile = self.sales_signals.update(
+            profile=updated_profile,
+            user_text=request.text,
+            intent=validation.semantic_turn.intent,
+        )
         updated_profile.conversation_summary = self.customer_state_service.build_summary(updated_profile)
         updated_profile.follow_up_suggestion = self.customer_state_service.build_follow_up(updated_profile)
         saved_profile = self.lead_service.save_profile(updated_profile)
@@ -273,7 +298,8 @@ class DialogueOrchestrator:
         logger.info(
             "dialogue_turn provider=%s session=%s parse_ms=%.1f validation_ms=%.1f "
             "recommendation_ms=%.1f render_ms=%.1f guard_ok=%s can_apply=%s "
-            "decision=%s sales_stage=%s next_best_action=%s degraded=%s intent=%s pending_slot=%s",
+            "decision=%s sales_stage=%s next_best_action=%s lead_temperature=%s "
+            "promotion_count=%s degraded=%s intent=%s pending_slot=%s",
             provider_mode,
             request.session_id,
             parse_ms,
@@ -285,6 +311,8 @@ class DialogueOrchestrator:
             decision.action,
             answer_plan.sales_stage,
             answer_plan.next_best_action,
+            saved_profile.lead_temperature,
+            len(answer_plan.approved_promotions),
             degraded,
             validation.semantic_turn.intent,
             context.pending_slot,
@@ -311,6 +339,9 @@ class DialogueOrchestrator:
             sales_stage=answer_plan.sales_stage,
             sales_objective=answer_plan.sales_objective,
             featured_collections=[collection.model_dump() for collection in answer_plan.featured_collections],
+            active_promotions=[promotion.model_dump() for promotion in answer_plan.approved_promotions],
+            should_offer_contact=answer_plan.ask_contact_consent,
+            contact_offer_reason=answer_plan.contact_request_reason,
         )
 
     def _resolve_provider(self, session_id: str, requested: DialogueProvider | None) -> DialogueProvider:
@@ -381,6 +412,9 @@ class DialogueOrchestrator:
                 "style": "现代简约、北欧原木或新中式",
                 "preferred_color": "浅灰色、原木色或深色系",
                 "priority": "防水、耐磨、环保、价格、脚感或好清洁",
+                "project_type": "新房装修、旧房翻新、局部改造或出租房",
+                "estimated_area_sqm": "大概多少平方米，例如 80 平方米",
+                "purchase_timeline": "1个月内、1到3个月、3个月以上或待定",
             }.get(context.pending_slot, "您的主要需求")
             question = f"我没有把这段语音听清。请确认识别文字，或直接回答“{slot_hint}”。"
         return question, suggested
@@ -394,6 +428,7 @@ class DialogueOrchestrator:
             "budget": {"中", "高", "低", "钱"},
             "style": {"现代", "原木"},
             "priority": {"水", "磨", "钱", "脚", "清洁"},
+            "purchase_timeline": {"快", "以后", "最近"},
         }
         return text in ambiguous.get(pending_slot, set())
 
@@ -405,6 +440,9 @@ class DialogueOrchestrator:
             "style": ("现代简约", "北欧", "原木风", "新中式", "轻奢"),
             "preferred_color": ("浅灰色", "浅灰", "灰色", "原木色", "深灰色", "深色系"),
             "priority": ("防水", "耐磨", "环保", "价格", "脚感", "好清洁"),
+            "project_type": ("新房装修", "旧房翻新", "局部改造", "出租房", "自住"),
+            "estimated_area_sqm": ("平方米", "平米", "㎡", "平"),
+            "purchase_timeline": ("1个月内", "一个月内", "1到3个月", "三个月以上", "待定"),
         }.get(pending_slot, ())
         for candidate in candidates:
             for term in vocab:
@@ -421,6 +459,14 @@ class DialogueOrchestrator:
                 return self.answer_plan_service.fallback_text(answer_plan)
         if not answer_plan.products and any(phrase in cleaned for phrase in EMPTY_COMMITMENT_PATTERNS):
             return self.answer_plan_service.fallback_text(answer_plan)
+        if not answer_plan.approved_promotions and any(word in cleaned for word in PROMOTION_WORDS):
+            # Prevent a renderer from inventing an activity when Backend approved none.
+            return self.answer_plan_service.fallback_text(answer_plan)
+        if answer_plan.response_type == "promotion" and answer_plan.approved_promotions:
+            if "演示" not in cleaned and not any(
+                promotion.title in cleaned for promotion in answer_plan.approved_promotions
+            ):
+                return self.answer_plan_service.fallback_text(answer_plan)
         return cleaned
 
     @staticmethod
@@ -429,6 +475,12 @@ class DialogueOrchestrator:
             return None
         if "最不愿意妥协" in question or "最重视" in question or "核心需求" in question:
             return "priority"
+        if "面积" in question or "平方米" in question:
+            return "estimated_area_sqm"
+        if "什么时候铺装" in question or "计划铺装" in question or "1个月内" in question:
+            return "purchase_timeline"
+        if "项目类型" in question or "新房装修" in question or "旧房翻新" in question:
+            return "project_type"
         if "房间" in question or "客厅" in question or "铺在" in question:
             return "room_type"
         if "预算" in question or "经济" in question:
@@ -453,6 +505,10 @@ class DialogueOrchestrator:
                 profile.room_type,
                 profile.style,
                 profile.budget,
+                profile.project_type,
+                profile.estimated_area_sqm,
+                profile.purchase_timeline,
+                profile.decision_stage,
                 profile.has_pets is not None,
                 profile.has_floor_heating is not None,
                 profile.has_children is not None,
@@ -464,6 +520,9 @@ class DialogueOrchestrator:
                 profile.preferred_product_ids,
                 profile.rejected_product_ids,
                 profile.recommended_product_ids,
+                profile.objections,
+                profile.promotion_ids_presented,
+                profile.contact_opt_in,
             ]
         )
 
