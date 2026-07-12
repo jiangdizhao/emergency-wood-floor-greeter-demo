@@ -38,6 +38,10 @@
         color: white;
       }
 
+      .utility-entry[hidden] {
+        display: none;
+      }
+
       .utility-entry:hover {
         transform: translateY(-1px);
       }
@@ -51,14 +55,36 @@
     </style>
     <script>
       (() => {
-        const storageKey = 'woodfloor_active_session_id'
+        const sessionStorageKey = 'woodfloor_active_session_id'
+        const offerStorageKey = 'woodfloor_follow_up_offer_visible'
         const originalFetch = window.fetch.bind(window)
 
         function rememberSession(value) {
           if (typeof value !== 'string' || !value.startsWith('session-')) return
-          sessionStorage.setItem(storageKey, value)
+          sessionStorage.setItem(sessionStorageKey, value)
           const link = document.getElementById('follow-up-entry')
           if (link) link.href = `/follow-up.html?session_id=${encodeURIComponent(value)}`
+        }
+
+        function updateOffer(payload) {
+          if (!payload || typeof payload !== 'object') return
+          const profile = payload.customer_profile || null
+          const hasOfferSignal =
+            payload.should_offer_contact === true ||
+            profile?.contact_prompt_eligible === true ||
+            profile?.contact_opt_in === true
+          const isFreshSession =
+            typeof payload.session_id === 'string' &&
+            profile &&
+            profile.contact_prompt_eligible === false &&
+            profile.contact_opt_in === false &&
+            (!Array.isArray(profile.recommended_product_ids) || profile.recommended_product_ids.length === 0)
+
+          if (hasOfferSignal) sessionStorage.setItem(offerStorageKey, '1')
+          else if (isFreshSession) sessionStorage.removeItem(offerStorageKey)
+
+          const link = document.getElementById('follow-up-entry')
+          if (link) link.hidden = sessionStorage.getItem(offerStorageKey) !== '1'
         }
 
         window.fetch = async (input, init) => {
@@ -78,16 +104,19 @@
               const payload = await response.clone().json()
               rememberSession(payload && payload.session_id)
               rememberSession(payload && payload.customer_profile && payload.customer_profile.session_id)
+              updateOffer(payload)
             }
           } catch {
-            // Session capture must never interfere with the real API response.
+            // Session/offer capture must never interfere with the real API response.
           }
           return response
         }
 
         window.addEventListener('DOMContentLoaded', () => {
-          const saved = sessionStorage.getItem(storageKey)
+          const saved = sessionStorage.getItem(sessionStorageKey)
           if (saved) rememberSession(saved)
+          const link = document.getElementById('follow-up-entry')
+          if (link) link.hidden = sessionStorage.getItem(offerStorageKey) !== '1'
         })
       })()
     </script>
@@ -95,7 +124,13 @@
   <body>
     <div id="root"></div>
     <nav class="utility-entry-dock" aria-label="数据和后续服务">
-      <a id="follow-up-entry" class="utility-entry primary" href="/follow-up.html" aria-label="获取本次方案与后续联系">
+      <a
+        id="follow-up-entry"
+        class="utility-entry primary"
+        href="/follow-up.html"
+        aria-label="获取本次方案与后续联系"
+        hidden
+      >
         获取方案与后续联系
       </a>
       <a class="utility-entry" href="/delete-my-data.html" aria-label="查看并删除我的本地数据">
