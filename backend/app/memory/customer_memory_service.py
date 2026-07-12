@@ -6,6 +6,7 @@ from typing import Any
 from ..identity.identity_service import IdentityService
 from ..identity.repository import IdentityRepository
 from ..models import CustomerProfile, DialogueProvider, IdentityChoice, IdentitySessionResponse
+from ..services.contact_pii_guard import ContactPIIGuard
 from ..services.dialogue_context_service import DialogueContextService
 from ..services.lead_service import LeadService
 from ..services.sales_knowledge_service import SalesKnowledgeService
@@ -36,6 +37,7 @@ class CustomerMemoryService:
         self.runtime_service = runtime_service
         self.context_service = context_service
         self.sales_knowledge_service = SalesKnowledgeService()
+        self.contact_pii_guard = ContactPIIGuard()
 
     def new_anonymous_session(
         self,
@@ -182,8 +184,11 @@ class CustomerMemoryService:
             summary=profile.conversation_summary,
             returning_context=profile.memory_summary,
         )
-        if user_text.strip():
-            self.repository.append_turn(session_id=session_id, role="customer", text=user_text)
+        safe_user_text = user_text
+        if self.contact_pii_guard.detect(user_text).detected:
+            safe_user_text = "[客户尝试通过聊天提供联系方式或姓名；原文已拦截且未保存]"
+        if safe_user_text.strip():
+            self.repository.append_turn(session_id=session_id, role="customer", text=safe_user_text)
         if assistant_text.strip():
             self.repository.append_turn(session_id=session_id, role="assistant", text=assistant_text)
 
@@ -252,7 +257,7 @@ class CustomerMemoryService:
             }
         )
         profile = CustomerProfile.model_validate(data)
-        self._reset_session_scoped_contact_state(profile)
+        self._reset_per_visit_state(profile)
         profile.memory_summary = self._build_memory_summary(profile, previous_summaries)
         return profile
 
@@ -282,7 +287,7 @@ class CustomerMemoryService:
             previous_visit_summaries=previous_summaries,
             last_seen_at=customer.get("last_seen_at"),
         )
-        self._reset_session_scoped_contact_state(profile)
+        self._reset_per_visit_state(profile)
         stable_bits = []
         for label, value in [
             ("家里有宠物", profile.has_pets),
@@ -296,14 +301,14 @@ class CustomerMemoryService:
         profile.memory_summary = (
             "这是回访客户的新项目。可沿用的稳定家庭背景："
             + ("、".join(stable_bits) if stable_bits else "暂无明确稳定条件")
-            + "。不要自动沿用上次项目的房间、预算、风格、面积、时间、颜色、推荐结果或联系授权。"
+            + "。不要自动沿用上次项目的房间、预算、风格、面积、时间、颜色、推荐结果、促销状态或联系授权。"
         )
         return profile
 
     @staticmethod
-    def _reset_session_scoped_contact_state(profile: CustomerProfile) -> None:
-        # A prior visit's contact/marketing consent belongs to that CRM record. A
-        # fresh visit must never imply a new outreach authorization automatically.
+    def _reset_per_visit_state(profile: CustomerProfile) -> None:
+        # A previous visit's consent, promotion presentation and follow-up workflow
+        # must never be silently treated as current-visit state.
         profile.phone = None
         profile.contact_prompt_eligible = bool(profile.recommended_product_ids)
         profile.contact_opt_in = False
@@ -313,6 +318,15 @@ class CustomerMemoryService:
         profile.preferred_contact_time = None
         profile.next_follow_up_at = None
         profile.follow_up_status = "未建档"
+        profile.promotion_ids_presented = []
+        profile.promotion_interest = None
+        profile.sales_stage = "recommendation" if profile.recommended_product_ids else "discovery"
+        profile.sales_objective = (
+            "确认历史主推方向是否仍适合本次访问"
+            if profile.recommended_product_ids
+            else "重新确认本次项目的核心购买驱动"
+        )
+        profile.lead_temperature = "warm" if profile.recommended_product_ids else "cold"
 
     def _build_memory_summary(self, profile: CustomerProfile, previous_summaries: list[str]) -> str:
         core = self._profile_memory_sentence(profile)
