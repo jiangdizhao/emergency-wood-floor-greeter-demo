@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import gc
+import shutil
 import sys
 import tempfile
-from contextlib import closing
+import time
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterator
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
@@ -28,6 +32,47 @@ from app.services.promotion_service import PromotionService
 from app.services.recommendation_service import RecommendationService
 from app.services.sales_knowledge_service import SalesKnowledgeService
 from app.services.sales_signals_service import SalesSignalsService
+
+
+@contextmanager
+def temporary_directory_with_retry(
+    *,
+    prefix: str,
+    attempts: int = 12,
+    delay_seconds: float = 0.25,
+) -> Iterator[str]:
+    """Create a temp directory and tolerate brief Windows scanner/indexer locks.
+
+    All SQLite connections must still be closed explicitly. The retry only handles
+    the short interval in which Windows Defender, Search Indexer, or Explorer may
+    inspect a newly-created database after the Python process has released it.
+    """
+
+    directory = Path(tempfile.mkdtemp(prefix=prefix))
+    try:
+        yield str(directory)
+    finally:
+        gc.collect()
+        last_error: PermissionError | None = None
+        for attempt in range(1, max(1, attempts) + 1):
+            try:
+                shutil.rmtree(directory)
+                last_error = None
+                break
+            except FileNotFoundError:
+                last_error = None
+                break
+            except PermissionError as exc:
+                last_error = exc
+                if attempt >= attempts:
+                    break
+                time.sleep(max(0.05, delay_seconds))
+                gc.collect()
+        if last_error is not None:
+            raise PermissionError(
+                f"Temporary CRM database remained locked after {attempts} cleanup attempts: "
+                f"{directory}. Use Resource Monitor or Sysinternals Handle to identify the holder."
+            ) from last_error
 
 
 def main() -> None:
@@ -149,14 +194,14 @@ def main() -> None:
     assert pii_guard.detect("微信号 woodfloor_demo").detected is True
     assert pii_guard.detect("客厅大概 80 平方米").detected is False
 
-    with tempfile.TemporaryDirectory(prefix="woodfloor-crm-") as temporary_directory:
+    with temporary_directory_with_retry(prefix="woodfloor-crm-") as temporary_directory:
         database_path = Path(temporary_directory) / "crm-test.db"
         repository = CRMRepository(database_path)
         # Simulate a lead captured before optional face enrollment. The later
         # conversation-session binding must still make it deletable by customer.
         # sqlite3.Connection.__exit__ commits or rolls back, but it does not close
         # the Windows file handle. closing(...) guarantees cleanup before the
-        # TemporaryDirectory is removed.
+        # temporary directory is removed.
         with closing(repository._connect()) as connection, connection:
             connection.execute(
                 """
