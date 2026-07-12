@@ -6,8 +6,18 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 DialogueProvider = Literal["terra", "qwen"]
-PendingSlot = Literal["room_type", "budget", "style", "preferred_color", "priority"]
+PendingSlot = Literal[
+    "room_type",
+    "budget",
+    "style",
+    "preferred_color",
+    "priority",
+    "estimated_area_sqm",
+    "purchase_timeline",
+    "project_type",
+]
 IdentityChoice = Literal["continue_previous", "new_project", "not_me"]
+ContactChannel = Literal["phone", "wechat", "email"]
 
 
 class SessionState(str, Enum):
@@ -45,11 +55,17 @@ class CustomerProfile(BaseModel):
     previous_visit_summaries: list[str] = Field(default_factory=list)
     last_seen_at: str | None = None
 
+    # Contact values are stored by CRMRepository, not sent to LLM providers.
     customer_name: str | None = None
     phone: str | None = None
+
     room_type: str | None = None
     style: str | None = None
     budget: str | None = None
+    project_type: str | None = None
+    estimated_area_sqm: float | None = Field(default=None, ge=1, le=10000)
+    purchase_timeline: str | None = None
+    decision_stage: str | None = None
 
     has_pets: bool | None = None
     has_floor_heating: bool | None = None
@@ -66,6 +82,19 @@ class CustomerProfile(BaseModel):
     sales_stage: str = "introduction"
     sales_objective: str = "建立专业可信度并确认客户最重要的购买驱动"
     featured_collection_ids: list[str] = Field(default_factory=list)
+    objections: list[str] = Field(default_factory=list)
+    lead_temperature: Literal["cold", "warm", "hot"] | str = "cold"
+
+    promotion_ids_presented: list[str] = Field(default_factory=list)
+    promotion_interest: bool | None = None
+
+    contact_prompt_eligible: bool = False
+    contact_opt_in: bool = False
+    marketing_opt_in: bool = False
+    contact_consent_at: str | None = None
+    preferred_contact_channel: ContactChannel | None = None
+    preferred_contact_time: str | None = None
+    next_follow_up_at: str | None = None
 
     # Kept for backward compatibility with the current UI and deterministic scorer.
     special_needs: list[str] = Field(default_factory=list)
@@ -124,6 +153,9 @@ class ChatResponse(BaseModel):
     sales_stage: str = "discovery"
     sales_objective: str = "确认客户需求"
     featured_collections: list[dict[str, Any]] = Field(default_factory=list)
+    active_promotions: list[dict[str, Any]] = Field(default_factory=list)
+    should_offer_contact: bool = False
+    contact_offer_reason: str | None = None
 
 
 class TTSRequest(BaseModel):
@@ -167,6 +199,34 @@ class CustomerSaveRequest(BaseModel):
     session_id: str = "demo-session-001"
     customer_name: str | None = None
     phone: str | None = None
+
+
+class LeadCaptureRequest(BaseModel):
+    session_id: str
+    display_name: str | None = Field(default=None, max_length=80)
+    contact_channel: ContactChannel
+    contact_value: str = Field(min_length=2, max_length=120)
+    contact_opt_in: bool
+    marketing_opt_in: bool = False
+    contact_purposes: list[str] = Field(default_factory=lambda: ["发送本次选购方案"])
+    preferred_contact_time: str | None = Field(default=None, max_length=80)
+
+
+class LeadConsentUpdateRequest(BaseModel):
+    session_id: str
+    contact_opt_in: bool
+    marketing_opt_in: bool = False
+
+
+class LeadDeleteRequest(BaseModel):
+    session_id: str
+
+
+class LeadFollowUpUpdateRequest(BaseModel):
+    lead_id: str
+    status: str
+    note: str = Field(default="", max_length=1000)
+    next_follow_up_at: str | None = None
 
 
 class IdentityRecognizeRequest(BaseModel):
