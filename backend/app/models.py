@@ -156,6 +156,7 @@ class ChatResponse(BaseModel):
     active_promotions: list[dict[str, Any]] = Field(default_factory=list)
     should_offer_contact: bool = False
     contact_offer_reason: str | None = None
+    sensitive_input_blocked: bool = False
 
 
 class TTSRequest(BaseModel):
