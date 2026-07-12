@@ -6,7 +6,7 @@ from .dialogue_context_service import DialogueContext
 
 
 class DialoguePolicy:
-    """Backend policy for clarification, senior-sales discovery, and recommendation."""
+    """Backend policy for clarification, discovery, qualification and recommendation."""
 
     def decide(
         self,
@@ -53,19 +53,25 @@ class DialoguePolicy:
                 or "我没有完全听清。请只说一个最重要的条件。",
             )
 
-        # A direct question about an existing product or recommendation must be
-        # answered before the proactive sales policy starts another recommendation.
-        if turn.intent in {"ask_reason", "general_product_question"}:
+        # Direct product, promotion, objection and acceptance turns are handled by
+        # the senior-sales policy before another automatic recommendation starts.
+        if turn.intent in {
+            "ask_reason",
+            "general_product_question",
+            "ask_promotion",
+            "express_objection",
+            "accept_recommendation",
+        }:
             return DialogueDecision(
                 action="acknowledge",
-                reason="answer the customer's product or rationale question first",
+                reason=f"answer sales intent first: {turn.intent}",
             )
 
         if self._profile_is_ready(profile):
             if context.pending_slot is not None or validation.can_apply:
                 return DialogueDecision(
                     action="recommend_now",
-                    reason="profile is sufficient for a useful recommendation",
+                    reason="profile is sufficient for a useful first recommendation",
                 )
 
         if validation.needs_clarification:
@@ -94,7 +100,9 @@ class DialoguePolicy:
 
     @staticmethod
     def _profile_is_ready(profile: CustomerProfile) -> bool:
-        # A senior recommendation needs both a use case and a clear purchase driver.
+        # Do not repeatedly auto-recommend after the first product set is stored.
+        if profile.recommended_product_ids:
+            return False
         if not profile.room_type or not profile.priorities:
             return False
         signals = 0
@@ -125,6 +133,10 @@ class DialoguePolicy:
             return "budget"
         if not profile.style:
             return "style"
+        if profile.recommended_product_ids and profile.estimated_area_sqm is None:
+            return "estimated_area_sqm"
+        if profile.recommended_product_ids and not profile.purchase_timeline:
+            return "purchase_timeline"
         if not profile.preferred_colors and not profile.rejected_colors:
             return "preferred_color"
         return None
@@ -136,6 +148,9 @@ class DialoguePolicy:
             "room_type": "明白了您的核心关注点。请问这次主要铺在客厅、卧室还是全屋？",
             "budget": "为了不让推荐偏离实际，您的预算更接近经济、中等、偏高还是高端？",
             "style": "在满足核心使用需求的前提下，您更喜欢现代简约、北欧原木、新中式还是其他风格？",
+            "project_type": "这次属于新房装修、旧房翻新、局部改造，还是出租房项目？",
+            "estimated_area_sqm": "为了判断组合方案、活动条件和后续报价，请问预计铺装面积大约多少平方米？",
+            "purchase_timeline": "您计划什么时候铺装：1个月内、1到3个月、3个月以上，还是时间待定？",
             "preferred_color": "为了让方案更接近最终效果，您更喜欢浅灰色、原木色还是深色系？",
         }
         return questions.get(slot)
