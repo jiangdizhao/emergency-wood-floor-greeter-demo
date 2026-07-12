@@ -67,6 +67,16 @@ class DialoguePolicy:
                 reason=f"answer sales intent first: {turn.intent}",
             )
 
+        # Once a recommendation exists, a genuine change to room, budget, style,
+        # living conditions, priority, colour or product preference must recompute
+        # the deterministic recommendation. Area, timeline and decision-stage
+        # updates only qualify the project and should not change the SKU ranking.
+        if profile.recommended_product_ids and self._changes_recommendation(validation):
+            return DialogueDecision(
+                action="recommend_now",
+                reason="customer changed a recommendation-driving requirement",
+            )
+
         if self._profile_is_ready(profile):
             if context.pending_slot is not None or validation.can_apply:
                 return DialogueDecision(
@@ -97,6 +107,33 @@ class DialoguePolicy:
             action="acknowledge",
             reason="state update acknowledged; no further slot is required",
         )
+
+    @staticmethod
+    def _changes_recommendation(validation: ValidationResult) -> bool:
+        driving_fields = {
+            "room_type",
+            "style",
+            "budget",
+            "has_pets",
+            "has_floor_heating",
+            "has_children",
+            "has_elderly",
+            "humid_environment",
+        }
+        for action in validation.actions:
+            if action.scope != "persistent":
+                continue
+            if action.kind == "set_field" and action.name in driving_fields:
+                return True
+            if action.kind in {
+                "set_priority",
+                "prefer_color",
+                "reject_color",
+                "prefer_product",
+                "reject_product",
+            }:
+                return True
+        return False
 
     @staticmethod
     def _profile_is_ready(profile: CustomerProfile) -> bool:
