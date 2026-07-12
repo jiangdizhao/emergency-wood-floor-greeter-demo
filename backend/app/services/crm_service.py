@@ -5,11 +5,11 @@ from datetime import datetime
 from typing import Any
 
 from ..models import (
-    CustomerProfile,
     LeadCaptureRequest,
     LeadConsentUpdateRequest,
     LeadFollowUpUpdateRequest,
 )
+from .crm_identity_bridge import CRMIdentityBridge
 from .crm_repository import CRMRepository
 from .lead_service import LeadService
 
@@ -30,6 +30,7 @@ class CRMService:
     def __init__(self, *, repository: CRMRepository, lead_service: LeadService) -> None:
         self.repository = repository
         self.lead_service = lead_service
+        self.identity_bridge = CRMIdentityBridge(repository)
 
     def capture(self, request: LeadCaptureRequest) -> dict[str, Any]:
         if not request.contact_opt_in:
@@ -174,9 +175,12 @@ class CRMService:
         return {"ok": True, "lead": self._staff_view(lead, include_contact=True)}
 
     def delete_for_identity(self, *, session_id: str, customer_id: str | None) -> int:
+        # Delete the current session lead first. For a confirmed customer, also
+        # delete CRM rows attached through any historical conversation session,
+        # including leads captured before optional face enrollment.
         deleted = 1 if self.repository.delete_by_session(session_id) else 0
         if customer_id:
-            deleted += self.repository.delete_by_customer(customer_id)
+            deleted += self.identity_bridge.delete_customer_records(customer_id=customer_id)
         return deleted
 
     @staticmethod
