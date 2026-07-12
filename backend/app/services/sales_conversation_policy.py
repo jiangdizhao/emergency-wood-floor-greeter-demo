@@ -26,14 +26,6 @@ class SalesConversationPolicy:
                 reason="shared validation guard requires clarification",
             )
 
-        if profile.contact_opt_in:
-            return SalesDecision(
-                stage="follow_up",
-                next_best_action="prepare_follow_up",
-                objective="尊重客户授权，确认方案发送和后续联系安排，不重复索取联系方式",
-                reason="customer has already granted contact consent",
-            )
-
         if intent == "ask_promotion":
             return SalesDecision(
                 stage="promotion",
@@ -53,7 +45,30 @@ class SalesConversationPolicy:
                 reason="customer expressed an objection or requested rationale",
             )
 
+        if intent == "general_product_question":
+            return SalesDecision(
+                stage="qualification",
+                next_best_action="qualify_needs",
+                objective="先准确回答客户当前产品问题，再决定是否推进销售下一步",
+                reason="explicit product question takes priority over follow-up state",
+            )
+
+        if dialogue_decision.action in {"recommend_now", "compare_now"}:
+            return SalesDecision(
+                stage="recommendation",
+                next_best_action="present_main_and_backup",
+                objective="围绕客户最重要的购买驱动，给出主推款与备选款，说明实际价值和至少一个诚实取舍",
+                reason="profile is ready or customer explicitly requested a recommendation",
+            )
+
         if intent == "accept_recommendation":
+            if profile.contact_opt_in:
+                return SalesDecision(
+                    stage="follow_up",
+                    next_best_action="prepare_follow_up",
+                    objective="尊重客户已经保存的授权，确认方案发送和后续联系安排，不重复索取联系方式",
+                    reason="customer accepted recommendation and contact consent already exists",
+                )
             if profile.contact_prompt_eligible:
                 return SalesDecision(
                     stage="lead_capture",
@@ -66,14 +81,6 @@ class SalesConversationPolicy:
                 next_best_action="soft_close",
                 objective="确认客户对主推方向的认可，并推动面积、时间或门店确认等低压力下一步",
                 reason="customer accepted the recommendation",
-            )
-
-        if dialogue_decision.action in {"recommend_now", "compare_now"}:
-            return SalesDecision(
-                stage="recommendation",
-                next_best_action="present_main_and_backup",
-                objective="围绕客户最重要的购买驱动，给出主推款与备选款，说明实际价值和至少一个诚实取舍",
-                reason="profile is ready or customer explicitly requested a recommendation",
             )
 
         if profile.recommended_product_ids:
@@ -97,6 +104,13 @@ class SalesConversationPolicy:
                     next_best_action="mention_approved_promotion",
                     objective="根据已确认的产品和面积，只介绍适用的批准演示活动",
                     reason="customer is interested in promotions and eligibility data is available",
+                )
+            if profile.contact_opt_in:
+                return SalesDecision(
+                    stage="follow_up",
+                    next_best_action="prepare_follow_up",
+                    objective="尊重客户已经保存的授权，确认方案发送和后续联系安排，不重复索取联系方式",
+                    reason="qualification complete and contact consent already exists",
                 )
             if profile.contact_prompt_eligible:
                 return SalesDecision(
