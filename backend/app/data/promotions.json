@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "simulated": true,
+  "disclaimer": "以下活动仅用于 Demo 演示，不构成真实门店报价或承诺。接入真实业务前必须由门店负责人审核并替换。",
+  "promotions": [
+    {
+      "promotion_id": "DEMO-SPC-60",
+      "title": "SPC 全屋安心方案（演示活动）",
+      "summary": "指定 SPC 产品达到演示面积条件后，可申请模拟的全屋铺装支持权益。",
+      "eligible_product_ids": ["WF-SPC-001", "WF-SPC-004"],
+      "eligible_collection_ids": ["easycare_family", "floor_heating_ready", "modern_design"],
+      "eligible_room_types": ["全屋", "客厅"],
+      "minimum_area_sqm": 60,
+      "start_at": "2026-01-01T00:00:00+00:00",
+      "end_at": "2027-12-31T23:59:59+00:00",
+      "conditions": [
+        "仅适用于指定 SPC 演示产品",
+        "建议铺装面积达到 60 平方米",
+        "实际价格、安装和权益必须以门店正式书面报价为准"
+      ],
+      "approved_message": "当前有一项标记为演示数据的 SPC 全屋安心方案：指定 SPC 产品在建议铺装面积达到 60 平方米时，可进一步申请门店铺装支持权益。具体权益与最终报价必须由门店顾问书面确认。",
+      "call_to_action": "如果您愿意提供大概面积，我可以先判断这项演示活动是否与您的项目方向匹配。",
+      "active": true
+    },
+    {
+      "promotion_id": "DEMO-WOOD-CONSULT",
+      "title": "实木质感方案咨询权益（演示活动）",
+      "summary": "选择多层实木或三层实木方向的客户，可申请模拟的样板与铺装方案咨询。",
+      "eligible_product_ids": ["WF-WOOD-002", "WF-WOOD-005"],
+      "eligible_collection_ids": ["natural_wood_comfort", "floor_heating_ready"],
+      "eligible_room_types": ["卧室", "书房", "客厅", "全屋"],
+      "minimum_area_sqm": null,
+      "start_at": "2026-01-01T00:00:00+00:00",
+      "end_at": "2027-12-31T23:59:59+00:00",
+      "conditions": [
+        "仅适用于多层实木或三层实木演示产品",
+        "样板、测量和铺装建议需由门店人员进一步确认",
+        "不代表免费安装或固定折扣"
+      ],
+      "approved_message": "当前实木质感系列有一项演示咨询权益，可进一步安排样板、空间搭配和铺装条件确认；它不代表免费安装或固定折扣，最终内容需由门店顾问确认。",
+      "call_to_action": "您更希望先确认脚感与木纹，还是先评估预算和日常维护要求？",
+      "active": true
+    },
+    {
+      "promotion_id": "DEMO-VALUE-ROOM",
+      "title": "局部翻新经济组合（演示活动）",
+      "summary": "面向卧室、书房或局部翻新的经济型演示组合。",
+      "eligible_product_ids": ["WF-LAM-003", "WF-LAM-006"],
+      "eligible_collection_ids": ["value_practical"],
+      "eligible_room_types": ["卧室", "书房", "儿童房", "老人房"],
+      "minimum_area_sqm": 15,
+      "start_at": "2026-01-01T00:00:00+00:00",
+      "end_at": "2027-12-31T23:59:59+00:00",
+      "conditions": [
+        "仅适用于指定强化复合演示产品",
+        "建议面积达到 15 平方米",
+        "潮湿或高防水场景需重新评估材料路线"
+      ],
+      "approved_message": "针对卧室、书房或局部翻新，目前有一项标记为演示数据的经济组合；指定强化复合产品在建议面积达到 15 平方米时，可进一步核对组合方案。潮湿或高防水场景仍需优先评估材料适配。",
+      "call_to_action": "请告诉我大概面积和计划铺装时间，我可以判断这项演示组合是否值得继续比较。",
+      "active": true
+    }
+  ]
+}
