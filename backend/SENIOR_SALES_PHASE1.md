@@ -55,13 +55,78 @@ AnswerPlanService
 
 ## 离线静态检查
 
-不需要 OpenAI API Key，也不需要启动 Ollama：
+不需要 OpenAI API Key，也不需要启动 Ollama。
+
+### 推荐方式：PowerShell 包装脚本
+
+该包装脚本默认通过 `conda run -n smartoffice` 执行，因此：
+
+- 不依赖当前 PowerShell 是否执行过 `conda init`；
+- 不会被子 PowerShell 的 profile 意外切换到 base Python；
+- 不需要先执行 `conda activate smartoffice`。
 
 ```powershell
 cd F:\emergency-wood-floor-greeter-demo\backend
-conda activate smartoffice
+
+powershell -ExecutionPolicy Bypass `
+  -File .\scripts\smoke_test_senior_sales.ps1
+```
+
+如环境名称不是 `smartoffice`：
+
+```powershell
+powershell -ExecutionPolicy Bypass `
+  -File .\scripts\smoke_test_senior_sales.ps1 `
+  -CondaEnvironment your-environment-name
+```
+
+也可以明确指定正确环境中的 Python：
+
+```powershell
+powershell -ExecutionPolicy Bypass `
+  -File .\scripts\smoke_test_senior_sales.ps1 `
+  -PythonExecutable "D:\anaconda3\envs\smartoffice\python.exe"
+```
+
+### 已经在 smartoffice 环境中的直接执行方式
+
+当当前提示符明确显示 `(smartoffice)`，并且下面命令返回的是该环境内的 Python 时：
+
+```powershell
+(Get-Command python).Source
+python --version
+```
+
+可以直接执行：
+
+```powershell
 python .\scripts\static_check_senior_sales.py
 ```
+
+### 不要这样激活环境
+
+下面的命令不能可靠地修改当前 PowerShell 的环境：
+
+```powershell
+D:\anaconda3\Scripts\conda.exe activate smartoffice
+```
+
+`conda activate` 是 PowerShell shell integration 提供的函数，不是普通的 `conda.exe` 子命令。若确实需要在当前 PowerShell 激活环境，可执行：
+
+```powershell
+& "D:\anaconda3\shell\condabin\conda-hook.ps1"
+conda activate smartoffice
+```
+
+或者完全跳过激活，使用：
+
+```powershell
+D:\anaconda3\Scripts\conda.exe run --no-capture-output `
+  -n smartoffice `
+  python .\scripts\static_check_senior_sales.py
+```
+
+该项目使用 Python 3.10+ 的类型语法。若误用 base Python 3.9，静态检查会直接显示当前解释器和版本，并提示切换到 `smartoffice`。
 
 成功时应看到：
 
