@@ -37,7 +37,7 @@ type NativeRecognition = {
 
 type NativeRecognitionConstructor = new () => NativeRecognition
 
-const DOMAIN_TERMS = [
+const ZH_DOMAIN_TERMS = [
   '浅灰色',
   '浅灰',
   '深灰色',
@@ -68,29 +68,65 @@ const DOMAIN_TERMS = [
   '强化地板',
 ]
 
+const EN_DOMAIN_TERMS = [
+  'light grey',
+  'natural oak',
+  'dark walnut',
+  'modern minimalist',
+  'Scandinavian',
+  'contemporary Chinese',
+  'living room',
+  'bedroom',
+  'whole home',
+  'economy',
+  'mid-range',
+  'premium',
+  'water resistance',
+  'waterproof',
+  'wear resistance',
+  'durable',
+  'environmental documentation',
+  'budget',
+  'underfoot feel',
+  'easy to clean',
+  'underfloor heating',
+  'pets',
+  'SPC',
+  'engineered wood',
+  'laminate',
+  'square metres',
+  'square meters',
+]
+
 const COMMON_BAD_SHORT_FORMS = new Set(['钱', '灰', '浅', '原', '中', '高', '低'])
 
-function candidateScore(candidate: NativeAlternative): number {
-  const text = candidate.transcript.replace(/\s+/g, '').trim()
-  if (!text) return Number.NEGATIVE_INFINITY
+function selectedLanguage(): 'zh' | 'en' {
+  const configured = (window as Window & { __WOODFLOOR_LANGUAGE__?: string }).__WOODFLOOR_LANGUAGE__
+  return configured === 'en' || window.localStorage.getItem('woodfloor_ui_language') === 'en' ? 'en' : 'zh'
+}
 
+function candidateScore(candidate: NativeAlternative): number {
+  const text = candidate.transcript.replace(/\s+/g, ' ').trim()
+  const normalized = selectedLanguage() === 'en' ? text.toLowerCase() : text.replace(/\s+/g, '')
+  if (!normalized) return Number.NEGATIVE_INFINITY
+
+  const terms = selectedLanguage() === 'en' ? EN_DOMAIN_TERMS : ZH_DOMAIN_TERMS
   let score = (candidate.confidence ?? 0) * 4
-  for (const term of DOMAIN_TERMS) {
-    if (text === term) score += 20
-    else if (text.includes(term)) score += 8
+  for (const term of terms) {
+    const comparableTerm = selectedLanguage() === 'en' ? term.toLowerCase() : term
+    if (normalized === comparableTerm) score += 20
+    else if (normalized.includes(comparableTerm)) score += 8
   }
 
-  if (COMMON_BAD_SHORT_FORMS.has(text)) score -= 8
-  if (text.length >= 2) score += 1
+  if (selectedLanguage() === 'zh' && COMMON_BAD_SHORT_FORMS.has(normalized)) score -= 8
+  if (normalized.length >= 2) score += 1
   return score
 }
 
 /**
  * Convert the browser's native SpeechRecognitionEvent into a small plain
  * JavaScript snapshot before reordering alternatives. Native Web Speech
- * objects are host objects and must not be wrapped in Proxy: Chrome can lose
- * event delivery or throw an "Illegal invocation" when native accessors or
- * methods receive a Proxy as `this`.
+ * objects are host objects and must not be wrapped in Proxy.
  */
 function rankEvent(event: NativeEvent): NativeEvent {
   const rankedResults: NativeResult[] = []
@@ -123,11 +159,6 @@ function installDomainRecognitionPatch() {
   const Original = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition
   if (!Original) return
 
-  /**
-   * A small facade is used instead of Proxying the native recognition object.
-   * All native methods are called on the real browser object, preserving the
-   * required Web Speech API receiver while still allowing domain ranking.
-   */
   class DomainRecognition implements NativeRecognition {
     private readonly nativeRecognition: NativeRecognition
     private resultHandler: ((event: NativeEvent) => void) | null = null
@@ -135,14 +166,17 @@ function installDomainRecognitionPatch() {
     constructor() {
       this.nativeRecognition = new Original()
       this.nativeRecognition.maxAlternatives = 3
+      this.nativeRecognition.lang = selectedLanguage() === 'en' ? 'en-US' : 'zh-CN'
     }
 
     get lang() {
       return this.nativeRecognition.lang
     }
 
-    set lang(value: string) {
-      this.nativeRecognition.lang = value
+    set lang(_value: string) {
+      // App.tsx historically set zh-CN directly. The one-click language selector
+      // is now authoritative, so prevent that legacy value from overriding English.
+      this.nativeRecognition.lang = selectedLanguage() === 'en' ? 'en-US' : 'zh-CN'
     }
 
     get continuous() {
@@ -199,12 +233,11 @@ function installDomainRecognitionPatch() {
 
     set onresult(value: ((event: NativeEvent) => void) | null) {
       this.resultHandler = value
-      this.nativeRecognition.onresult = value
-        ? (event: NativeEvent) => value(rankEvent(event))
-        : null
+      this.nativeRecognition.onresult = value ? (event: NativeEvent) => value(rankEvent(event)) : null
     }
 
     start() {
+      this.nativeRecognition.lang = selectedLanguage() === 'en' ? 'en-US' : 'zh-CN'
       this.nativeRecognition.start()
     }
 
