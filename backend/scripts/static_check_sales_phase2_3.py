@@ -19,6 +19,7 @@ from app.llm.prompts import build_parse_user_prompt
 from app.llm.schemas import DialogueDecision, SalesDecision, SemanticTurn, ValidationResult
 from app.models import CustomerProfile
 from app.services.answer_plan_service import AnswerPlanService
+from app.services.contact_pii_guard import ContactPIIGuard
 from app.services.crm_identity_bridge import CRMIdentityBridge
 from app.services.crm_repository import CRMRepository
 from app.services.product_service import ProductService
@@ -42,6 +43,7 @@ def main() -> None:
         promotion_service,
     )
     sales_signals = SalesSignalsService()
+    pii_guard = ContactPIIGuard()
 
     profile = CustomerProfile(
         session_id="phase23-static-session",
@@ -124,7 +126,7 @@ def main() -> None:
     assert qualified.lead_temperature in {"warm", "hot"}
     assert qualified.contact_prompt_eligible is True
 
-    # Contact details must be stripped before any LLM prompt is constructed.
+    # Contact details must be stripped from profile context before a prompt is built.
     prompt = build_parse_user_prompt(
         "请继续讲方案",
         {
@@ -138,6 +140,13 @@ def main() -> None:
     assert "+61412345678" not in prompt
     assert "private@example.com" not in prompt
     assert "测试客户" not in prompt
+
+    # Raw contact details in a customer utterance must be detected before any LLM
+    # parse call. Normal flooring measurements must remain usable.
+    assert pii_guard.detect("我的邮箱是 private@example.com").detected is True
+    assert pii_guard.detect("我的手机号是 +61 412 345 678").detected is True
+    assert pii_guard.detect("微信号 woodfloor_demo").detected is True
+    assert pii_guard.detect("客厅大概 80 平方米").detected is False
 
     with tempfile.TemporaryDirectory(prefix="woodfloor-crm-") as temporary_directory:
         database_path = Path(temporary_directory) / "crm-test.db"
@@ -236,6 +245,7 @@ def main() -> None:
     print("Approved promotion: " + plan.approved_promotions[0].title)
     print("Lead temperature: " + qualified.lead_temperature)
     print("Contact PII excluded from LLM prompt: yes")
+    print("Contact PII blocked before LLM parsing: yes")
     print("Separate contact and marketing consent: yes")
     print("Three-day local follow-up reminder: yes")
     print("Identity-linked CRM deletion: yes")
