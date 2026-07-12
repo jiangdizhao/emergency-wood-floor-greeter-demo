@@ -6,9 +6,9 @@ from ..models import CustomerProfile
 
 class CustomerStateService:
     def apply(self, *, profile: CustomerProfile, validation: ValidationResult) -> CustomerProfile:
-        # Apply only actions that survived the shared validation guard. A turn
-        # may be partially understood: safe actions are retained while the
-        # unresolved part is clarified in the next assistant response.
+        # Apply only actions that survived the shared validation guard. A turn may
+        # be partially understood: safe actions are retained while the unresolved
+        # part is clarified in the next assistant response.
         if not validation.can_apply:
             return profile.model_copy(deep=True)
 
@@ -47,8 +47,16 @@ class CustomerStateService:
         parts: list[str] = []
         if profile.primary_purchase_driver:
             parts.append(f"首要购买驱动：{profile.primary_purchase_driver}")
+        if profile.project_type:
+            parts.append(f"项目类型：{profile.project_type}")
         if profile.room_type:
             parts.append(f"使用空间：{profile.room_type}")
+        if profile.estimated_area_sqm is not None:
+            parts.append(f"预计面积：{profile.estimated_area_sqm:g}㎡")
+        if profile.purchase_timeline:
+            parts.append(f"计划铺装：{profile.purchase_timeline}")
+        if profile.decision_stage:
+            parts.append(f"决策阶段：{profile.decision_stage}")
         if profile.style:
             parts.append(f"偏好风格：{profile.style}")
         if profile.budget:
@@ -70,6 +78,11 @@ class CustomerStateService:
             parts.append("偏好颜色：" + "、".join(profile.preferred_colors))
         if profile.rejected_colors:
             parts.append("排除颜色：" + "、".join(profile.rejected_colors))
+        if profile.objections:
+            parts.append("当前顾虑：" + "、".join(profile.objections))
+        if profile.promotion_ids_presented:
+            parts.append("已介绍活动：" + "、".join(profile.promotion_ids_presented))
+        parts.append(f"销售线索温度：{profile.lead_temperature}")
         return "；".join(parts) if parts else "客户正在了解木地板产品，需求尚未明确。"
 
     @staticmethod
@@ -83,9 +96,17 @@ class CustomerStateService:
             missing.append("预算")
         if not profile.style:
             missing.append("装修风格")
+        if profile.recommended_product_ids and profile.estimated_area_sqm is None:
+            missing.append("大概面积")
+        if profile.recommended_product_ids and not profile.purchase_timeline:
+            missing.append("计划铺装时间")
         if missing:
-            return "建议销售继续确认" + "、".join(missing) + "，再给出正式报价和安装建议。"
-        return "建议销售在 24 小时内发送主推款与备选款对比方案，并确认面积、安装时间和最终预算。"
+            return "建议销售继续确认" + "、".join(missing) + "，再给出正式报价、促销适用判断和安装建议。"
+        if profile.contact_opt_in:
+            return "客户已授权针对本次方案联系；建议按 next_follow_up_at 发送方案并记录结果。"
+        if profile.contact_prompt_eligible:
+            return "客户已形成明确方案方向，可邀请其通过独立表单授权发送方案和后续联系。"
+        return "建议销售发送主推款与备选款对比，并确认面积、安装时间和最终预算。"
 
     @staticmethod
     def _set_field(profile: CustomerProfile, name: str, value: str) -> None:
@@ -97,7 +118,16 @@ class CustomerStateService:
             "humid_environment",
         }:
             setattr(profile, name, value == "yes")
-        elif name in {"room_type", "style", "budget"}:
+        elif name == "estimated_area_sqm":
+            profile.estimated_area_sqm = float(value)
+        elif name in {
+            "room_type",
+            "style",
+            "budget",
+            "project_type",
+            "purchase_timeline",
+            "decision_stage",
+        }:
             setattr(profile, name, value)
 
     @staticmethod
