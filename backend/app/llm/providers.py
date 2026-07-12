@@ -6,8 +6,12 @@ from typing import Any
 
 import requests
 
+from ..localization import localize_direct_message
 from ..models import CustomerProfile
+from ..response_language import get_current_response_language
 from .prompts import (
+    EN_QWEN_RENDER_SYSTEM_PROMPT,
+    EN_RENDER_SYSTEM_PROMPT,
     PARSE_SYSTEM_PROMPT,
     QWEN_RENDER_SYSTEM_PROMPT,
     RENDER_SYSTEM_PROMPT,
@@ -144,20 +148,25 @@ class TerraDialogueProvider(DialogueLLMProvider):
             raise DialogueProviderError(f"Terra semantic output failed validation: {exc}") from exc
 
     def render_answer(self, *, answer_plan: AnswerPlan) -> str:
+        language = get_current_response_language()
         if answer_plan.direct_message and answer_plan.response_type in {
             "clarification",
             "acknowledgement",
             "service_unavailable",
         }:
-            return answer_plan.direct_message
+            return localize_direct_message(answer_plan.direct_message, language) or answer_plan.direct_message
+        system_prompt = EN_RENDER_SYSTEM_PROMPT if language == "en" else RENDER_SYSTEM_PROMPT
         payload = {
             "model": self.model,
             "input": [
-                {"role": "system", "content": RENDER_SYSTEM_PROMPT},
-                {"role": "user", "content": build_render_user_prompt(answer_plan)},
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": build_render_user_prompt(answer_plan, response_language=language),
+                },
             ],
             "reasoning": {"effort": "none"},
-            "max_output_tokens": 360,
+            "max_output_tokens": 420 if language == "en" else 360,
             "store": False,
         }
         return self._output_text(self._post(payload, self.render_timeout))
@@ -240,24 +249,29 @@ class QwenDialogueProvider(DialogueLLMProvider):
             raise DialogueProviderError(f"Qwen semantic output failed validation: {exc}") from exc
 
     def render_answer(self, *, answer_plan: AnswerPlan) -> str:
+        language = get_current_response_language()
         if answer_plan.direct_message and answer_plan.response_type in {
             "clarification",
             "acknowledgement",
             "service_unavailable",
         }:
-            return answer_plan.direct_message
+            return localize_direct_message(answer_plan.direct_message, language) or answer_plan.direct_message
+        system_prompt = EN_QWEN_RENDER_SYSTEM_PROMPT if language == "en" else QWEN_RENDER_SYSTEM_PROMPT
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": QWEN_RENDER_SYSTEM_PROMPT},
-                {"role": "user", "content": build_render_user_prompt(answer_plan)},
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": build_render_user_prompt(answer_plan, response_language=language),
+                },
             ],
             "stream": False,
             "think": False,
             "keep_alive": self.keep_alive,
             "options": {
                 "num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "4096")),
-                "num_predict": int(os.getenv("OLLAMA_RENDER_MAX_TOKENS", "220")),
+                "num_predict": int(os.getenv("OLLAMA_RENDER_MAX_TOKENS", "260" if language == "en" else "220")),
                 "temperature": 0.2,
             },
         }
