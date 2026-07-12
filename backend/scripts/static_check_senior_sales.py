@@ -7,6 +7,13 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+if sys.version_info < (3, 10):
+    print("Senior sales phase-one static check requires Python 3.10 or newer.")
+    print(f"Current interpreter: {sys.executable}")
+    print(f"Current version: {sys.version}")
+    print("Run this script through the smartoffice conda environment, not the base Anaconda interpreter.")
+    raise SystemExit(2)
+
 from app.llm.schemas import DialogueDecision, SalesDecision, SemanticTurn, ValidationResult
 from app.models import CustomerProfile
 from app.services.answer_plan_service import AnswerPlanService
@@ -16,6 +23,9 @@ from app.services.sales_knowledge_service import SalesKnowledgeService
 
 
 def main() -> None:
+    print(f"Python executable: {sys.executable}")
+    print(f"Python version: {sys.version.split()[0]}")
+
     product_service = ProductService()
     knowledge = SalesKnowledgeService()
     answer_plans = AnswerPlanService(product_service, knowledge)
@@ -28,6 +38,7 @@ def main() -> None:
     assert len(collections) >= 4
     assert "高级地板选购顾问" in greeting
     assert "最不愿意妥协" in greeting
+    assert "。。" not in greeting
 
     profile = CustomerProfile(
         session_id="sales-static-check",
