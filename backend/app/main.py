@@ -34,6 +34,7 @@ from .models import (
     SessionStatusResponse,
     TTSRequest,
 )
+from .sales_api import crm_service, promotion_service, router as sales_router
 from .services.answer_plan_service import AnswerPlanService
 from .services.chat_service import ChatService
 from .services.customer_state_service import CustomerStateService
@@ -64,10 +65,10 @@ class UTF8JSONResponse(JSONResponse):
 
 app = FastAPI(
     title="Emergency Wood Floor Greeter Demo API",
-    version="0.3.0",
+    version="0.5.0",
     description=(
         "Wood-floor retail AI greeter with parallel Terra/Qwen dialogue modes, "
-        "local consent-based face identity and returning-customer memory."
+        "controlled promotions, consent-aware local CRM, local face identity and returning-customer memory."
     ),
     default_response_class=UTF8JSONResponse,
 )
@@ -84,6 +85,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(sales_router)
 
 
 @app.middleware("http")
@@ -106,7 +108,10 @@ provider_registry = ProviderRegistry()
 runtime_service = SessionRuntimeService()
 validation_guard = ValidationGuard(product_service=product_service)
 customer_state_service = CustomerStateService()
-answer_plan_service = AnswerPlanService(product_service=product_service)
+answer_plan_service = AnswerPlanService(
+    product_service=product_service,
+    promotion_service=promotion_service,
+)
 dialogue_context_service = DialogueContextService()
 
 dialogue_orchestrator = DialogueOrchestrator(
@@ -235,10 +240,20 @@ def root() -> dict:
         "status": "running",
         "docs": "/docs",
         "dialogue_architecture": "parallel Terra cloud mode and Qwen local mode; no hidden cross-provider fallback",
+        "sales_architecture": "deterministic sales policy, approved simulated promotions and consent-separated local CRM",
         "identity_architecture": "local YuNet/SFace candidate recognition with explicit confirmation before memory restore",
         "important_endpoints": [
             "GET /api/health",
             "GET /api/llm/status",
+            "GET /api/sales/catalog",
+            "GET /api/promotions/active",
+            "POST /api/leads/contact",
+            "GET /api/leads/contact/status",
+            "PATCH /api/leads/contact/consent",
+            "DELETE /api/leads/contact",
+            "GET /api/crm/leads",
+            "GET /api/crm/reminders/due",
+            "POST /api/crm/leads/follow-up",
             "GET /api/identity/status",
             "POST /api/identity/recognize",
             "POST /api/identity/session/new",
@@ -250,7 +265,6 @@ def root() -> dict:
             "POST /api/chat",
             "POST /api/tts",
             "GET /api/tts/status",
-            "POST /api/greeting/voice",
             "POST /api/demo/event",
             "GET /api/session/status",
             "POST /api/session/reset",
@@ -269,6 +283,8 @@ def health() -> dict:
         "ok": True,
         "state": state_machine.state.value,
         "product_count": len(product_service.list_products()),
+        "active_promotion_count": len(promotion_service.active_promotions()),
+        "active_crm_lead_count": crm_service.repository.count_active(),
         "vision_running": vision_service.get_status().get("running", False),
         "openai_tts_configured": bool(os.getenv("OPENAI_API_KEY")),
         "local_tts_available": _local_tts_available(),
@@ -353,6 +369,12 @@ def identity_enroll(request: IdentityEnrollRequest) -> dict:
 
 @app.delete("/api/identity/me")
 def identity_forget(request: IdentityForgetRequest) -> dict:
+    profile = lead_service.load_profile(session_id=request.session_id)
+    customer_id = profile.customer_id or identity_repository.get_session_customer_id(request.session_id)
+    crm_deleted = crm_service.delete_for_identity(
+        session_id=request.session_id,
+        customer_id=customer_id,
+    )
     deleted = customer_memory_service.delete_current_customer(
         session_id=request.session_id,
         delete_history=request.delete_history,
@@ -360,10 +382,11 @@ def identity_forget(request: IdentityForgetRequest) -> dict:
     return {
         "ok": deleted,
         "deleted": deleted,
+        "crm_records_deleted": crm_deleted,
         "message": (
-            "已删除本地人脸特征和客户身份记录。"
+            "已删除本地人脸特征、客户身份、联系方式授权和关联历史记录。"
             if deleted
-            else "当前会话没有绑定可删除的客户身份。"
+            else "当前会话没有绑定可删除的客户身份；已尝试清理该会话的联系方式记录。"
         ),
     }
 
@@ -558,24 +581,23 @@ def chat(request: ChatRequest) -> ChatResponse:
 
 @app.post("/api/customer/save")
 def save_customer(request: CustomerSaveRequest) -> dict:
+    """Legacy non-contact profile endpoint.
+
+    Contact details require two explicit consent fields and therefore must use
+    POST /api/leads/contact. This route intentionally no longer stores phone values.
+    """
+    if request.phone:
+        raise HTTPException(
+            status_code=400,
+            detail="联系方式必须通过 /api/leads/contact 提交，并明确区分本次方案联系与营销授权。",
+        )
     profile = lead_service.load_profile(session_id=request.session_id)
     profile.customer_name = request.customer_name or profile.customer_name
-    profile.phone = request.phone or profile.phone
-    profile.follow_up_status = "待联系"
+    profile.follow_up_status = "未授权联系方式"
     profile = lead_service.save_profile(profile)
-    if profile.customer_id:
-        runtime = runtime_service.load(request.session_id)
-        identity_repository.create_or_update_session(
-            session_id=request.session_id,
-            customer_id=profile.customer_id,
-            provider_mode=runtime.provider_mode,
-            profile=profile.model_dump(),
-            summary=profile.conversation_summary,
-            returning_context=profile.memory_summary,
-        )
     return {
         "ok": True,
-        "message": "客户需求已保存到本地模拟档案。",
+        "message": "客户称呼已保存；未保存联系方式。",
         "customer_profile": profile.model_dump(),
     }
 
