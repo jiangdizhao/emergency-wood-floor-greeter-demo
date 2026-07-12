@@ -14,6 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from starlette.responses import Response
 
+Language = Literal["zh", "en"]
+
 
 @dataclass
 class KokoroRuntime:
@@ -31,14 +33,14 @@ class KokoroRuntime:
 
 class LocalTTSRequest(BaseModel):
     text: str = Field(min_length=1)
-    language: Literal["zh", "en"] = "en"
+    language: Language = "en"
     voice: str | None = None
     speed: float = 1.0
 
 
 runtime = KokoroRuntime(lock=threading.RLock(), inference_lock=threading.Lock())
 
-DEFAULT_EN_VOICE = os.getenv("KOKORO_EN_VOICE", "af_heart")
+DEFAULT_EN_VOICE = os.getenv("KOKORO_EN_VOICE", "am_liam")
 DEFAULT_ZH_VOICE = os.getenv("KOKORO_ZH_VOICE", "zm_yunxi")
 SAMPLE_RATE = int(os.getenv("KOKORO_SAMPLE_RATE", "24000"))
 WARMUP_ON_START = os.getenv("KOKORO_WARMUP_ON_START", "true").strip().lower() not in {
@@ -49,7 +51,11 @@ WARMUP_ON_START = os.getenv("KOKORO_WARMUP_ON_START", "true").strip().lower() no
 }
 WARMUP_TEXT_ZH = os.getenv(
     "KOKORO_WARMUP_TEXT_ZH",
-    "您好，欢迎来到木地板体验区。我是您的 AI 选购顾问小木。我可以根据房间、装修风格、预算，以及地暖、宠物和日常清洁需求，为您推荐合适的地板。请问您这次主要想为哪个空间选择地板呢？",
+    "您好，欢迎来到木地板体验区。我是您的 AI 选购顾问小木。",
+)
+WARMUP_TEXT_EN = os.getenv(
+    "KOKORO_WARMUP_TEXT_EN",
+    "Hello, welcome to the wood flooring experience area. I am your AI flooring consultant, Xiao Mu.",
 )
 WARMUP_ZH_VOICES = tuple(
     dict.fromkeys(
@@ -66,9 +72,24 @@ WARMUP_ZH_VOICES = tuple(
         ]
     )
 )
+WARMUP_EN_VOICES = tuple(
+    dict.fromkeys(
+        [
+            DEFAULT_EN_VOICE,
+            *[
+                voice.strip()
+                for voice in os.getenv(
+                    "KOKORO_WARMUP_EN_VOICES",
+                    "am_liam,am_michael,am_puck,am_onyx",
+                ).split(",")
+                if voice.strip()
+            ],
+        ]
+    )
+)
 
 
-def _load_pipeline(language: Literal["zh", "en"]):
+def _load_pipeline(language: Language):
     with runtime.lock:
         try:
             from kokoro import KPipeline
@@ -92,7 +113,7 @@ def _load_pipeline(language: Literal["zh", "en"]):
 
 def _synthesize_wav(
     text: str,
-    language: Literal["zh", "en"],
+    language: Language,
     voice: str,
     speed: float,
 ) -> bytes:
@@ -122,14 +143,41 @@ def _synthesize_wav(
         return buffer.getvalue()
 
 
-def _warmup_chinese_voices() -> None:
+def _warmup_voice_group(*, language: Language, voices: tuple[str, ...], text: str) -> None:
+    label = "English" if language == "en" else "Mandarin"
+    speed = 1.0
+    text = text.strip()
+    print(f"Warming up Kokoro {label} voices: " + ", ".join(voices), flush=True)
+
+    for voice in voices:
+        started = time.perf_counter()
+        cache_key = (language, voice, speed, text)
+        error_key = f"{language}:{voice}"
+        try:
+            audio = _synthesize_wav(text=text, language=language, voice=voice, speed=speed)
+            elapsed = time.perf_counter() - started
+            with runtime.lock:
+                runtime.warmup_cache[cache_key] = audio
+                runtime.warmup_errors.pop(error_key, None)
+            print(
+                f"Kokoro {label} voice '{voice}' warm-up completed in {elapsed:.2f}s; "
+                f"welcome audio cached ({len(audio)} bytes).",
+                flush=True,
+            )
+        except Exception as exc:  # pragma: no cover - runtime environment specific
+            elapsed = time.perf_counter() - started
+            with runtime.lock:
+                runtime.warmup_errors[error_key] = str(exc)
+            print(
+                f"Kokoro {label} voice '{voice}' warm-up failed after {elapsed:.2f}s: {exc}",
+                flush=True,
+            )
+
+
+def _warmup_selectable_voices() -> None:
     if not WARMUP_ON_START:
         print("Kokoro startup warm-up is disabled.", flush=True)
         return
-
-    language: Literal["zh", "en"] = "zh"
-    speed = 1.0
-    text = WARMUP_TEXT_ZH.strip()
 
     with runtime.lock:
         runtime.warmup_started_at = time.time()
@@ -137,32 +185,9 @@ def _warmup_chinese_voices() -> None:
         runtime.warmup_cache.clear()
         runtime.warmup_errors.clear()
 
-    print(
-        "Warming up Kokoro Mandarin voices: " + ", ".join(WARMUP_ZH_VOICES),
-        flush=True,
-    )
     total_started = time.perf_counter()
-
-    for voice in WARMUP_ZH_VOICES:
-        started = time.perf_counter()
-        cache_key = (language, voice, speed, text)
-        try:
-            audio = _synthesize_wav(text=text, language=language, voice=voice, speed=speed)
-            elapsed = time.perf_counter() - started
-            with runtime.lock:
-                runtime.warmup_cache[cache_key] = audio
-            print(
-                f"Kokoro voice '{voice}' warm-up completed in {elapsed:.2f}s; "
-                f"welcome audio cached ({len(audio)} bytes).",
-                flush=True,
-            )
-        except Exception as exc:  # pragma: no cover - runtime environment specific
-            elapsed = time.perf_counter() - started
-            with runtime.lock:
-                runtime.warmup_errors[voice] = str(exc)
-            # Continue warming the remaining voices. The main backend still has
-            # OpenAI/browser fallbacks if one local voice is unavailable.
-            print(f"Kokoro voice '{voice}' warm-up failed after {elapsed:.2f}s: {exc}", flush=True)
+    _warmup_voice_group(language="zh", voices=WARMUP_ZH_VOICES, text=WARMUP_TEXT_ZH)
+    _warmup_voice_group(language="en", voices=WARMUP_EN_VOICES, text=WARMUP_TEXT_EN)
 
     with runtime.lock:
         runtime.warmup_completed_at = time.time()
@@ -171,7 +196,7 @@ def _warmup_chinese_voices() -> None:
 
     total_elapsed = time.perf_counter() - total_started
     print(
-        f"Kokoro Mandarin warm-up finished in {total_elapsed:.2f}s; "
+        f"Kokoro bilingual warm-up finished in {total_elapsed:.2f}s; "
         f"cached={cached_count}, errors={error_count}.",
         flush=True,
     )
@@ -179,17 +204,16 @@ def _warmup_chinese_voices() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # Finish loading and caching all four selectable Mandarin voices before
-    # Uvicorn reports the service as ready. Customer-facing voice changes then
-    # avoid first-use model/voice latency.
-    _warmup_chinese_voices()
+    # Complete loading and caching before Uvicorn reports readiness. This avoids
+    # first-use latency after the customer changes either language or voice.
+    _warmup_selectable_voices()
     yield
 
 
 app = FastAPI(
     title="Local Kokoro TTS Server",
-    version="0.3.0",
-    description="Standalone local TTS server for the wood-floor greeter demo.",
+    version="0.4.0",
+    description="Standalone bilingual local TTS server for the wood-floor greeter demo.",
     lifespan=lifespan,
 )
 
@@ -217,7 +241,18 @@ def health() -> dict:
                 3,
             )
 
-        cached_voices = sorted({cache_key[1] for cache_key in runtime.warmup_cache})
+        cached_by_language = {
+            language: sorted(
+                {
+                    cache_key[1]
+                    for cache_key in runtime.warmup_cache
+                    if cache_key[0] == language
+                }
+            )
+            for language in ("zh", "en")
+        }
+        zh_ready = all(voice in cached_by_language["zh"] for voice in WARMUP_ZH_VOICES)
+        en_ready = all(voice in cached_by_language["en"] for voice in WARMUP_EN_VOICES)
         warmup_error = (
             "; ".join(f"{voice}: {message}" for voice, message in runtime.warmup_errors.items())
             or None
@@ -233,10 +268,17 @@ def health() -> dict:
             "default_zh_voice": DEFAULT_ZH_VOICE,
             "sample_rate": SAMPLE_RATE,
             "warmup_enabled": WARMUP_ON_START,
-            "warmup_ready": all(voice in cached_voices for voice in WARMUP_ZH_VOICES),
+            "warmup_ready": zh_ready and en_ready,
+            "warmup_zh_ready": zh_ready,
+            "warmup_en_ready": en_ready,
+            "warmup_zh_voices": list(WARMUP_ZH_VOICES),
+            "warmup_en_voices": list(WARMUP_EN_VOICES),
+            "warmup_zh_cached_voices": cached_by_language["zh"],
+            "warmup_en_cached_voices": cached_by_language["en"],
+            # Backward-compatible fields retained for existing checks.
             "warmup_voice": DEFAULT_ZH_VOICE,
             "warmup_voices": list(WARMUP_ZH_VOICES),
-            "warmup_cached_voices": cached_voices,
+            "warmup_cached_voices": cached_by_language["zh"],
             "warmup_started_at": runtime.warmup_started_at,
             "warmup_completed_at": runtime.warmup_completed_at,
             "warmup_elapsed_seconds": warmup_elapsed_seconds,
