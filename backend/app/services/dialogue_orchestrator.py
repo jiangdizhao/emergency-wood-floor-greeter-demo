@@ -9,6 +9,7 @@ from ..llm.schemas import AnswerPlan, DialogueDecision
 from ..models import ChatRequest, ChatResponse, CustomerProfile, DialogueProvider
 from .answer_plan_service import AnswerPlanService
 from .chat_service import ChatService
+from .contact_pii_guard import ContactPIIGuard
 from .customer_state_service import CustomerStateService
 from .dialogue_context_service import DialogueContext, DialogueContextService
 from .dialogue_policy import DialoguePolicy
@@ -61,6 +62,7 @@ class DialogueOrchestrator:
         self.dialogue_policy = DialoguePolicy()
         self.sales_policy = SalesConversationPolicy()
         self.sales_signals = SalesSignalsService()
+        self.contact_pii_guard = ContactPIIGuard()
 
     def handle_turn(self, request: ChatRequest) -> ChatResponse:
         provider_mode = self._resolve_provider(request.session_id, request.provider_mode)
@@ -122,6 +124,44 @@ class DialogueOrchestrator:
                         "预算、耐磨、防水、脚感、环保，还是日常好清洁？"
                     ),
                 }
+            )
+
+        pii_detection = self.contact_pii_guard.detect(request.text)
+        if pii_detection.detected:
+            answer = self.contact_pii_guard.customer_message()
+            context = self.context_service.advance(
+                context=context,
+                user_text="[联系方式或姓名已在进入 LLM 前拦截]",
+                pending_slot=context.pending_slot,
+                assistant_question=context.last_assistant_question,
+                response_type="clarification",
+            )
+            logger.info(
+                "contact_pii_blocked provider=%s session=%s categories=%s",
+                provider_mode,
+                request.session_id,
+                ",".join(pii_detection.categories),
+            )
+            return ChatResponse(
+                answer=answer,
+                recommended_products=self._saved_recommendations(profile),
+                customer_profile=profile,
+                follow_up_suggestion=profile.follow_up_suggestion,
+                state=self.state_machine.state,
+                provider_mode=provider_mode,
+                provider_label=provider_label,
+                needs_clarification=False,
+                pending_slot=context.pending_slot,
+                last_assistant_question=context.last_assistant_question,
+                sales_stage=profile.sales_stage,
+                sales_objective="保护联系方式隐私并引导客户使用独立授权表单",
+                should_offer_contact=profile.contact_prompt_eligible and not profile.contact_opt_in,
+                contact_offer_reason=(
+                    "请使用独立表单提交联系方式，聊天内容不会传给 LLM。"
+                    if profile.contact_prompt_eligible and not profile.contact_opt_in
+                    else None
+                ),
+                sensitive_input_blocked=True,
             )
 
         normalized_text = self.validation_guard.normalize_text(request.text)
