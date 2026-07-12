@@ -42,7 +42,10 @@ class SalesConversationPolicy:
                 reason="customer explicitly asked about promotions",
             )
 
-        if intent in {"express_objection", "ask_reason"} or profile.objections:
+        # Historical objections remain in the profile for summaries and CRM context,
+        # but only the current turn can enter objection-handling mode. Otherwise one
+        # earlier price concern would trap every later turn in the same stage.
+        if intent in {"express_objection", "ask_reason"}:
             return SalesDecision(
                 stage="objection_handling",
                 next_best_action="explain_tradeoff",
