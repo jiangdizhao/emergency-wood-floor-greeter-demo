@@ -17,6 +17,8 @@ class CustomerMemoryService:
 
     Identity and conversation session are deliberately separate. Every visit gets
     a fresh session_id, even when a returning customer continues a previous project.
+    Contact and marketing consent are also session-scoped and are never silently
+    copied into a newly created visit.
     """
 
     def __init__(
@@ -250,6 +252,7 @@ class CustomerMemoryService:
             }
         )
         profile = CustomerProfile.model_validate(data)
+        self._reset_session_scoped_contact_state(profile)
         profile.memory_summary = self._build_memory_summary(profile, previous_summaries)
         return profile
 
@@ -270,7 +273,6 @@ class CustomerMemoryService:
             customer_id=customer_id,
             is_returning_customer=True,
             customer_name=customer.get("display_name") or previous.customer_name,
-            phone=previous.phone,
             has_pets=previous.has_pets,
             has_floor_heating=previous.has_floor_heating,
             has_children=previous.has_children,
@@ -280,6 +282,7 @@ class CustomerMemoryService:
             previous_visit_summaries=previous_summaries,
             last_seen_at=customer.get("last_seen_at"),
         )
+        self._reset_session_scoped_contact_state(profile)
         stable_bits = []
         for label, value in [
             ("家里有宠物", profile.has_pets),
@@ -293,9 +296,23 @@ class CustomerMemoryService:
         profile.memory_summary = (
             "这是回访客户的新项目。可沿用的稳定家庭背景："
             + ("、".join(stable_bits) if stable_bits else "暂无明确稳定条件")
-            + "。不要自动沿用上次项目的房间、预算、风格、颜色或推荐结果。"
+            + "。不要自动沿用上次项目的房间、预算、风格、面积、时间、颜色、推荐结果或联系授权。"
         )
         return profile
+
+    @staticmethod
+    def _reset_session_scoped_contact_state(profile: CustomerProfile) -> None:
+        # A prior visit's contact/marketing consent belongs to that CRM record. A
+        # fresh visit must never imply a new outreach authorization automatically.
+        profile.phone = None
+        profile.contact_prompt_eligible = bool(profile.recommended_product_ids)
+        profile.contact_opt_in = False
+        profile.marketing_opt_in = False
+        profile.contact_consent_at = None
+        profile.preferred_contact_channel = None
+        profile.preferred_contact_time = None
+        profile.next_follow_up_at = None
+        profile.follow_up_status = "未建档"
 
     def _build_memory_summary(self, profile: CustomerProfile, previous_summaries: list[str]) -> str:
         core = self._profile_memory_sentence(profile)
@@ -309,8 +326,16 @@ class CustomerMemoryService:
         parts: list[str] = []
         if profile.primary_purchase_driver:
             parts.append(f"首要需求={profile.primary_purchase_driver}")
+        if profile.project_type:
+            parts.append(f"项目类型={profile.project_type}")
         if profile.room_type:
             parts.append(f"空间={profile.room_type}")
+        if profile.estimated_area_sqm is not None:
+            parts.append(f"面积={profile.estimated_area_sqm:g}㎡")
+        if profile.purchase_timeline:
+            parts.append(f"铺装时间={profile.purchase_timeline}")
+        if profile.decision_stage:
+            parts.append(f"决策阶段={profile.decision_stage}")
         if profile.style:
             parts.append(f"风格={profile.style}")
         if profile.budget:
@@ -319,6 +344,8 @@ class CustomerMemoryService:
             parts.append("偏好颜色=" + "、".join(profile.preferred_colors))
         if profile.recommended_product_ids:
             parts.append("上次推荐=" + "、".join(profile.recommended_product_ids))
+        if profile.objections:
+            parts.append("上次顾虑=" + "、".join(profile.objections))
         if profile.has_pets is True:
             parts.append("有宠物")
         if profile.has_floor_heating is True:
