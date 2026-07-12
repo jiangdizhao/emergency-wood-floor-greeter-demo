@@ -56,14 +56,18 @@ class SalesKnowledgeService:
         company = self.company_profile()
         consultant = str(company.get("consultant_name") or "小木")
         role = str(company.get("consultant_role") or "地板选购顾问")
-        positioning = str(company.get("positioning") or "木地板整体选购顾问门店")
-        value = str(company.get("consultant_value_proposition") or "帮助您比较不同地板方案的价值与取舍")
+        positioning = self._sentence_fragment(
+            str(company.get("positioning") or "木地板整体选购顾问门店")
+        )
+        value = self._sentence_fragment(
+            str(company.get("consultant_value_proposition") or "帮助您比较不同地板方案的价值与取舍")
+        )
         highlights = list(company.get("opening_highlights") or [])[:4]
         highlight_text = "、".join(str(item) for item in highlights if str(item).strip())
         question = str(
             company.get("opening_question")
             or "这次选地板，您最重视预算、耐磨、防水、脚感、环保，还是日常好清洁？"
-        )
+        ).strip()
         return (
             f"您好，欢迎来到{company.get('company_name', '木地板体验店')}。"
             f"我是{consultant}，也是这里的{role}。我们是一家{positioning}，"
@@ -132,6 +136,10 @@ class SalesKnowledgeService:
             return None
         rank = {"high": 3, "medium": 2, "low": 1}
         return max(profile.priorities.items(), key=lambda item: rank.get(item[1], 0))[0]
+
+    @staticmethod
+    def _sentence_fragment(value: str) -> str:
+        return value.strip().rstrip("。.!！?？；;")
 
     @staticmethod
     def _read_json(path: Path) -> dict[str, Any]:
