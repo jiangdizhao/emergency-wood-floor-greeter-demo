@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import re
+import sqlite3
 from datetime import datetime
 from typing import Any
 
@@ -236,6 +238,51 @@ class CRMService:
     def _staff_view(self, lead: dict[str, Any], *, include_contact: bool) -> dict[str, Any]:
         output = dict(lead)
         output["contact_masked"] = self.repository.masked_contact(lead)
+        output.update(self._session_sales_context(str(lead.get("session_id") or "")))
         if not include_contact:
             output.pop("contact_value", None)
         return output
+
+    def _session_sales_context(self, session_id: str) -> dict[str, Any]:
+        if not session_id:
+            return {}
+        try:
+            with self.repository._connect() as connection:
+                row = connection.execute(
+                    """
+                    SELECT summary, profile_json, returning_context
+                    FROM conversation_sessions
+                    WHERE session_id = ?
+                    """,
+                    (session_id,),
+                ).fetchone()
+        except sqlite3.Error:
+            return {}
+        if row is None:
+            return {}
+
+        try:
+            profile = json.loads(row["profile_json"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            profile = {}
+        if not isinstance(profile, dict):
+            profile = {}
+
+        return {
+            "conversation_summary": str(
+                row["summary"]
+                or profile.get("conversation_summary")
+                or row["returning_context"]
+                or ""
+            ),
+            "primary_purchase_driver": profile.get("primary_purchase_driver"),
+            "project_type": profile.get("project_type"),
+            "room_type": profile.get("room_type"),
+            "budget": profile.get("budget"),
+            "style": profile.get("style"),
+            "estimated_area_sqm": profile.get("estimated_area_sqm"),
+            "purchase_timeline": profile.get("purchase_timeline"),
+            "decision_stage": profile.get("decision_stage"),
+            "recommended_product_ids": list(profile.get("recommended_product_ids") or []),
+            "objections": list(profile.get("objections") or []),
+        }
