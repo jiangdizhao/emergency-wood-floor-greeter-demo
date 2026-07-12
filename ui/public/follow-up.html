@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>获取方案与后续联系 · 木地板 AI 选购顾问</title>
+    <style>
+      :root {
+        font-family: Inter, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+        color: #35251e;
+        background: #f4eee7;
+      }
+      * { box-sizing: border-box; }
+      body {
+        min-height: 100vh;
+        margin: 0;
+        background:
+          radial-gradient(circle at 10% 0%, rgba(203, 151, 111, .26), transparent 34%),
+          radial-gradient(circle at 95% 95%, rgba(101, 137, 102, .18), transparent 31%),
+          #f6f0e9;
+      }
+      button, input, select, textarea { font: inherit; }
+      .shell { width: min(900px, calc(100% - 28px)); margin: 0 auto; padding: 30px 0 60px; }
+      .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+      .brand { display: flex; align-items: center; gap: 10px; color: #76503b; font-weight: 850; }
+      .mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 13px; color: white; background: linear-gradient(145deg,#b66f3f,#713b28); }
+      a { color: inherit; }
+      .back { padding: 9px 14px; border: 1px solid rgba(112,76,55,.2); border-radius: 999px; background: rgba(255,253,249,.88); text-decoration: none; font-size: 14px; font-weight: 750; }
+      .card { overflow: hidden; border: 1px solid rgba(133,91,67,.14); border-radius: 28px; background: rgba(255,253,249,.96); box-shadow: 0 24px 70px rgba(67,43,31,.13); }
+      .hero { padding: clamp(28px,5vw,48px); background: linear-gradient(145deg,rgba(255,252,247,.98),rgba(243,229,215,.94)); }
+      .eyebrow { margin: 0 0 10px; color: #a46542; font-size: 13px; font-weight: 850; letter-spacing: .09em; }
+      h1 { margin: 0; font-family: "Noto Serif SC","Songti SC",serif; font-size: clamp(34px,6vw,54px); line-height: 1.15; }
+      .hero p:last-child { max-width: 720px; margin: 18px 0 0; color: #6d594e; font-size: 17px; line-height: 1.75; }
+      .content { display: grid; gap: 20px; padding: clamp(22px,4vw,38px); }
+      .summary { display: grid; gap: 8px; padding: 18px; border: 1px solid rgba(133,91,67,.14); border-radius: 18px; background: #fffaf5; }
+      .summary strong { color: #624332; }
+      .summary p { margin: 0; color: #756156; line-height: 1.65; }
+      .privacy { padding: 15px 17px; border-radius: 16px; background: #f1e8df; color: #6e584b; line-height: 1.65; font-size: 14px; }
+      form { display: grid; gap: 17px; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+      label.field { display: grid; gap: 7px; color: #5c4438; font-weight: 750; }
+      input, select, textarea { width: 100%; border: 1px solid #d8c5b8; border-radius: 12px; padding: 12px 13px; background: white; color: #33251f; }
+      input:focus, select:focus, textarea:focus { outline: 3px solid rgba(175,108,67,.15); border-color: #a86a46; }
+      .consent { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 11px; padding: 15px; border: 1px solid rgba(126,88,65,.16); border-radius: 15px; background: #fffaf5; color: #634d42; line-height: 1.6; }
+      .consent input { width: 21px; height: 21px; margin-top: 2px; }
+      .consent strong { display: block; margin-bottom: 3px; color: #4e362b; }
+      .purpose-box { padding: 16px; border-radius: 16px; background: #f8f3ed; }
+      .purpose-box > strong { display: block; margin-bottom: 10px; }
+      .purpose-list { display: grid; gap: 9px; }
+      .purpose-list label { display: flex; align-items: center; gap: 9px; color: #675247; }
+      .purpose-list input { width: 18px; height: 18px; }
+      .actions { display: flex; flex-wrap: wrap; gap: 11px; }
+      button { min-height: 48px; padding: 11px 18px; border: 1px solid rgba(128,85,60,.2); border-radius: 13px; background: #fffaf5; color: #654536; cursor: pointer; font-weight: 820; }
+      button:disabled { cursor: not-allowed; opacity: .55; }
+      .primary { border: 0; color: white; background: linear-gradient(135deg,#9c5d3c,#713a26); box-shadow: 0 12px 26px rgba(118,68,42,.24); }
+      .danger { border-color: rgba(156,62,45,.3); color: #8b382b; background: #fff4ef; }
+      .status { display: none; padding: 15px 17px; border-radius: 15px; line-height: 1.6; }
+      .status.visible { display: block; }
+      .status.info { background: #f2e7dc; color: #6e4c3a; }
+      .status.success { border: 1px solid rgba(76,122,67,.2); background: #edf5e9; color: #45663e; }
+      .status.error { border: 1px solid rgba(171,68,45,.22); background: #fff0ea; color: #803b2b; }
+      .existing { display: none; gap: 13px; padding: 20px; border: 1px solid rgba(75,117,69,.18); border-radius: 19px; background: #f3f8ef; }
+      .existing.visible { display: grid; }
+      .existing h2 { margin: 0; color: #45613e; }
+      .existing p { margin: 0; color: #5d7057; line-height: 1.6; }
+      .small { color: #948279; font-size: 12px; text-align: center; line-height: 1.6; }
+      @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } .actions button { width: 100%; } }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand"><span class="mark">✦</span><span>木地板 AI 选购顾问</span></div>
+        <a class="back" href="/">返回导购</a>
+      </header>
+
+      <section class="card">
+        <div class="hero">
+          <p class="eyebrow">方案发送与授权</p>
+          <h1>获取本次方案与后续联系</h1>
+          <p>联系方式完全自愿，只保存在运行此 Demo 的本机数据库。针对本次方案的联系授权与长期新品、优惠信息授权是两个独立选项。</p>
+        </div>
+
+        <div class="content">
+          <section class="summary" aria-live="polite">
+            <strong>本次咨询摘要</strong>
+            <p id="session-summary">正在读取当前咨询 Session…</p>
+          </section>
+
+          <div class="privacy">
+            真实联系方式不会发送给 Terra、Qwen 或任何 LLM。LLM 最多只知道“客户是否已经授权联系”，不会看到手机号、微信号、邮箱或客户姓名。
+          </div>
+
+          <div id="status" class="status" role="status" aria-live="polite"></div>
+
+          <section id="existing" class="existing">
+            <h2>已保存联系授权</h2>
+            <p id="existing-detail"></p>
+            <div class="actions">
+              <button id="disable-marketing" type="button">保留本次联系，关闭营销推送</button>
+              <button id="revoke-all" class="danger" type="button">撤回全部主动联系授权</button>
+              <button id="delete-contact" class="danger" type="button">永久删除联系方式和跟进记录</button>
+            </div>
+          </section>
+
+          <form id="lead-form">
+            <div class="grid">
+              <label class="field">
+                <span>称呼（可选）</span>
+                <input id="display-name" maxlength="80" placeholder="例如：王先生" autocomplete="name" />
+              </label>
+              <label class="field">
+                <span>联系方式类型</span>
+                <select id="contact-channel">
+                  <option value="phone">手机</option>
+                  <option value="wechat">微信</option>
+                  <option value="email">邮箱</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="grid">
+              <label class="field">
+                <span>联系方式</span>
+                <input id="contact-value" maxlength="120" placeholder="请输入手机号" autocomplete="tel" required />
+              </label>
+              <label class="field">
+                <span>方便联系的时间（可选）</span>
+                <input id="preferred-time" maxlength="80" placeholder="例如：工作日下午 3 点后" />
+              </label>
+            </div>
+
+            <div class="purpose-box">
+              <strong>本次联系用途</strong>
+              <div class="purpose-list">
+                <label><input type="checkbox" value="发送本次选购方案" checked disabled />发送本次选购方案</label>
+                <label><input class="purpose" type="checkbox" value="跟进报价与样板" checked />跟进报价与样板</label>
+                <label><input class="purpose" type="checkbox" value="预约到店或测量" />预约到店或测量</label>
+              </div>
+            </div>
+
+            <label class="consent">
+              <input id="contact-opt-in" type="checkbox" />
+              <span><strong>本次方案联系授权（必选）</strong>我同意门店仅为发送本次方案、报价、样板或到店安排而联系我。我可以随时撤回并删除数据。</span>
+            </label>
+
+            <label class="consent">
+              <input id="marketing-opt-in" type="checkbox" />
+              <span><strong>新品与优惠信息授权（可选）</strong>我另外同意接收后续新品和优惠信息。未勾选不会影响获取本次方案。</span>
+            </label>
+
+            <div class="actions">
+              <button id="submit" class="primary" type="submit" disabled>保存授权并安排后续</button>
+              <a class="back" href="/">暂不留下联系方式</a>
+            </div>
+          </form>
+
+          <p class="small">Demo 默认在授权后三天生成一次本地跟进提醒。它不会自动发送短信、微信或邮件；门店人员必须在本地工作台确认后执行。</p>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      (() => {
+        const params = new URLSearchParams(location.search)
+        const API_BASE = (params.get('api') || 'http://127.0.0.1:8000').replace(/\/$/, '')
+        const sessionId = params.get('session_id') || sessionStorage.getItem('woodfloor_active_session_id') || ''
+
+        const summary = document.getElementById('session-summary')
+        const status = document.getElementById('status')
+        const form = document.getElementById('lead-form')
+        const existing = document.getElementById('existing')
+        const existingDetail = document.getElementById('existing-detail')
+        const displayName = document.getElementById('display-name')
+        const channel = document.getElementById('contact-channel')
+        const contactValue = document.getElementById('contact-value')
+        const preferredTime = document.getElementById('preferred-time')
+        const contactOptIn = document.getElementById('contact-opt-in')
+        const marketingOptIn = document.getElementById('marketing-opt-in')
+        const submit = document.getElementById('submit')
+        const disableMarketing = document.getElementById('disable-marketing')
+        const revokeAll = document.getElementById('revoke-all')
+        const deleteContact = document.getElementById('delete-contact')
+        let busy = false
+
+        function setStatus(kind, message) {
+          status.className = `status visible ${kind}`
+          status.textContent = message
+        }
+        function setBusy(value) {
+          busy = value
+          for (const item of form.querySelectorAll('input,select,button')) item.disabled = value || (item === submit && !contactOptIn.checked)
+          disableMarketing.disabled = value
+          revokeAll.disabled = value
+          deleteContact.disabled = value
+        }
+        function updateSubmit() { submit.disabled = busy || !contactOptIn.checked || !contactValue.value.trim() || !sessionId }
+        async function request(path, init = {}) {
+          const response = await fetch(`${API_BASE}${path}`, {
+            ...init,
+            headers: { 'Content-Type': 'application/json; charset=utf-8', ...(init.headers || {}) },
+          })
+          const text = await response.text()
+          let data = null
+          try { data = text ? JSON.parse(text) : null } catch { data = { detail: text } }
+          if (!response.ok) throw new Error(data?.detail || `${response.status} ${response.statusText}`)
+          return data
+        }
+        function purposes() {
+          return ['发送本次选购方案', ...Array.from(document.querySelectorAll('.purpose:checked')).map((item) => item.value)]
+        }
+        function channelPlaceholder() {
+          const map = { phone: ['请输入手机号', 'tel'], wechat: ['请输入微信号', 'off'], email: ['请输入邮箱', 'email'] }
+          const value = map[channel.value] || map.phone
+          contactValue.placeholder = value[0]
+          contactValue.autocomplete = value[1]
+        }
+        async function load() {
+          if (!sessionId) {
+            summary.textContent = '尚未找到当前咨询 Session。请先返回导购，点击开始咨询并形成方案后再打开本页。'
+            setStatus('error', '没有可关联的咨询 Session，因此不会保存联系方式。')
+            updateSubmit()
+            return
+          }
+          try {
+            const session = await request(`/api/session/status?session_id=${encodeURIComponent(sessionId)}`)
+            const profile = session.customer_profile || {}
+            summary.textContent = profile.conversation_summary || '当前 Session 已建立，但需求摘要尚未形成。您仍可返回导购继续咨询。'
+            const saved = await request(`/api/leads/contact/status?session_id=${encodeURIComponent(sessionId)}`)
+            if (saved.exists && saved.lead) showExisting(saved.lead)
+          } catch (error) {
+            setStatus('error', `读取 Session 失败：${error.message}`)
+          }
+          updateSubmit()
+        }
+        function showExisting(lead) {
+          existing.classList.add('visible')
+          existingDetail.textContent = `${lead.contact_channel} · ${lead.contact_masked}；本次联系授权：${lead.contact_opt_in ? '已同意' : '已撤回'}；营销授权：${lead.marketing_opt_in ? '已同意' : '未同意'}；状态：${lead.follow_up_status || '待处理'}。`
+        }
+        async function updateConsent(contact, marketing) {
+          setBusy(true)
+          try {
+            const result = await request('/api/leads/contact/consent', {
+              method: 'PATCH',
+              body: JSON.stringify({ session_id: sessionId, contact_opt_in: contact, marketing_opt_in: marketing }),
+            })
+            showExisting(result.lead)
+            setStatus('success', result.message)
+          } catch (error) {
+            setStatus('error', `更新授权失败：${error.message}`)
+          } finally { setBusy(false); updateSubmit() }
+        }
+        form.addEventListener('submit', async (event) => {
+          event.preventDefault()
+          if (!contactOptIn.checked || !sessionId || busy) return
+          setBusy(true)
+          setStatus('info', '正在本机保存授权和联系方式…')
+          try {
+            const result = await request('/api/leads/contact', {
+              method: 'POST',
+              body: JSON.stringify({
+                session_id: sessionId,
+                display_name: displayName.value.trim() || null,
+                contact_channel: channel.value,
+                contact_value: contactValue.value.trim(),
+                contact_opt_in: true,
+                marketing_opt_in: marketingOptIn.checked,
+                contact_purposes: purposes(),
+                preferred_contact_time: preferredTime.value.trim() || null,
+              }),
+            })
+            showExisting(result.lead)
+            setStatus('success', result.message + ' 默认三天后会在本地工作台生成跟进提醒。')
+          } catch (error) {
+            setStatus('error', `保存失败：${error.message}`)
+          } finally { setBusy(false); updateSubmit() }
+        })
+        disableMarketing.addEventListener('click', () => void updateConsent(true, false))
+        revokeAll.addEventListener('click', () => void updateConsent(false, false))
+        deleteContact.addEventListener('click', async () => {
+          if (busy || !confirm('确认永久删除当前 Session 的联系方式、授权和全部跟进记录吗？')) return
+          setBusy(true)
+          try {
+            const result = await request('/api/leads/contact', { method: 'DELETE', body: JSON.stringify({ session_id: sessionId }) })
+            existing.classList.remove('visible')
+            setStatus(result.deleted ? 'success' : 'info', result.message)
+          } catch (error) {
+            setStatus('error', `删除失败：${error.message}`)
+          } finally { setBusy(false); updateSubmit() }
+        })
+        channel.addEventListener('change', channelPlaceholder)
+        contactValue.addEventListener('input', updateSubmit)
+        contactOptIn.addEventListener('change', updateSubmit)
+        channelPlaceholder()
+        void load()
+      })()
+    </script>
+  </body>
+</html>
