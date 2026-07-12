@@ -6,15 +6,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>木地板 AI 选购顾问</title>
     <style>
-      .privacy-data-entry {
+      .utility-entry-dock {
         position: fixed;
         z-index: 80;
         right: 18px;
         bottom: 16px;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+        max-width: min(92vw, 520px);
+      }
+
+      .utility-entry {
         padding: 9px 14px;
         border: 1px solid rgba(112, 76, 55, 0.2);
         border-radius: 999px;
-        background: rgba(255, 253, 249, 0.9);
+        background: rgba(255, 253, 249, 0.92);
         box-shadow: 0 8px 22px rgba(71, 47, 34, 0.12);
         color: #76503b;
         font-family: Inter, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
@@ -24,17 +32,76 @@
         backdrop-filter: blur(10px);
       }
 
-      .privacy-data-entry:hover {
-        background: #fffaf5;
+      .utility-entry.primary {
+        border-color: rgba(139, 79, 48, 0.25);
+        background: linear-gradient(135deg, rgba(161, 96, 61, 0.96), rgba(112, 58, 38, 0.96));
+        color: white;
+      }
+
+      .utility-entry:hover {
         transform: translateY(-1px);
       }
+
+      @media (max-width: 640px) {
+        .utility-entry-dock {
+          right: 10px;
+          bottom: 10px;
+        }
+      }
     </style>
+    <script>
+      (() => {
+        const storageKey = 'woodfloor_active_session_id'
+        const originalFetch = window.fetch.bind(window)
+
+        function rememberSession(value) {
+          if (typeof value !== 'string' || !value.startsWith('session-')) return
+          sessionStorage.setItem(storageKey, value)
+          const link = document.getElementById('follow-up-entry')
+          if (link) link.href = `/follow-up.html?session_id=${encodeURIComponent(value)}`
+        }
+
+        window.fetch = async (input, init) => {
+          try {
+            if (init && typeof init.body === 'string') {
+              const body = JSON.parse(init.body)
+              rememberSession(body && body.session_id)
+            }
+          } catch {
+            // Non-JSON request body.
+          }
+
+          const response = await originalFetch(input, init)
+          try {
+            const contentType = response.headers.get('content-type') || ''
+            if (contentType.includes('application/json')) {
+              const payload = await response.clone().json()
+              rememberSession(payload && payload.session_id)
+              rememberSession(payload && payload.customer_profile && payload.customer_profile.session_id)
+            }
+          } catch {
+            // Session capture must never interfere with the real API response.
+          }
+          return response
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+          const saved = sessionStorage.getItem(storageKey)
+          if (saved) rememberSession(saved)
+        })
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
-    <a class="privacy-data-entry" href="/delete-my-data.html" aria-label="查看并删除我的本地数据">
-      隐私与数据
-    </a>
+    <nav class="utility-entry-dock" aria-label="数据和后续服务">
+      <a id="follow-up-entry" class="utility-entry primary" href="/follow-up.html" aria-label="获取本次方案与后续联系">
+        获取方案与后续联系
+      </a>
+      <a class="utility-entry" href="/delete-my-data.html" aria-label="查看并删除我的本地数据">
+        隐私与数据
+      </a>
+    </nav>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
