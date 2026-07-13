@@ -67,9 +67,13 @@ def main() -> None:
     assert "English" in EN_RENDER_SYSTEM_PROMPT
     assert "English" in EN_QWEN_RENDER_SYSTEM_PROMPT
 
+    public_dir = REPO_ROOT / "ui" / "public"
     ui_api = (REPO_ROOT / "ui" / "src" / "api.ts").read_text(encoding="utf-8")
-    ui_runtime = (REPO_ROOT / "ui" / "public" / "bilingual-ui.js").read_text(encoding="utf-8")
-    ui_network = (REPO_ROOT / "ui" / "public" / "bilingual-network.js").read_text(encoding="utf-8")
+    ui_runtime = (public_dir / "bilingual-ui.js").read_text(encoding="utf-8")
+    ui_network = (public_dir / "bilingual-network.js").read_text(encoding="utf-8")
+    ui_dynamic = (public_dir / "bilingual-dynamic.js").read_text(encoding="utf-8")
+    ui_speech = (public_dir / "bilingual-speech.js").read_text(encoding="utf-8")
+    ui_pages = (public_dir / "bilingual-pages.js").read_text(encoding="utf-8")
     speech_patch = (REPO_ROOT / "ui" / "src" / "speechRecognitionDomainPatch.ts").read_text(encoding="utf-8")
     index_html = (REPO_ROOT / "ui" / "index.html").read_text(encoding="utf-8")
 
@@ -81,20 +85,33 @@ def main() -> None:
     assert "woodfloor-language-toggle" in ui_runtime
     assert "/bilingual-ui.js" in index_html
     assert "/bilingual-network.js" in index_html
+    assert "/bilingual-dynamic.js" in ui_network
+    assert "/bilingual-speech.js" in ui_dynamic
+    assert "utterance.text = translate" in ui_speech
+    assert "Store sales workbench" in ui_pages
+
+    for page_name in ("follow-up.html", "delete-my-data.html", "crm-workbench.html"):
+        page = (public_dir / page_name).read_text(encoding="utf-8")
+        assert "/bilingual-ui.js" in page, f"Missing language selector on {page_name}"
+        assert "/bilingual-pages.js" in page, f"Missing utility-page translation on {page_name}"
 
     tts_server = (REPO_ROOT / "local_tts" / "kokoro_tts_server.py").read_text(encoding="utf-8")
     downloader = (REPO_ROOT / "local_tts" / "download_english_voices.py").read_text(encoding="utf-8")
+    requirements = (REPO_ROOT / "local_tts" / "requirements.txt").read_text(encoding="utf-8")
     for voice in ("am_liam", "am_michael", "am_puck", "am_onyx"):
         assert voice in tts_server
         assert voice in downloader
     assert 'KPipeline(lang_code="a")' in tts_server
     assert "warmup_en_ready" in tts_server
+    assert "huggingface-hub" in requirements
 
     print("Bilingual UI and speech static check passed.")
     print("English AnswerPlan localization: yes")
     print("Terra and Qwen English render prompts: yes")
     print("One-click UI language selector: yes")
     print("English browser speech recognition: yes")
+    print("English browser TTS fallback text: yes")
+    print("English utility and CRM pages: yes")
     print("English Kokoro voice mapping: am_liam, am_michael, am_puck, am_onyx")
     print("Bilingual Kokoro startup warm-up: yes")
 
