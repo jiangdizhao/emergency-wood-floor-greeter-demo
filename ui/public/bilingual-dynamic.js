@@ -1,4 +1,11 @@
 (() => {
+  if (!document.querySelector('script[data-woodfloor-speech-i18n]')) {
+    const script = document.createElement('script')
+    script.src = '/bilingual-speech.js'
+    script.dataset.woodfloorSpeechI18n = 'true'
+    document.head.appendChild(script)
+  }
+
   function isEnglish() {
     return window.__WOODFLOOR_LANGUAGE__ === 'en' || window.localStorage.getItem('woodfloor_ui_language') === 'en'
   }
