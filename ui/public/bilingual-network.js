@@ -1,4 +1,11 @@
 (() => {
+  if (!document.querySelector('script[data-woodfloor-dynamic-i18n]')) {
+    const script = document.createElement('script')
+    script.src = '/bilingual-dynamic.js'
+    script.dataset.woodfloorDynamicI18n = 'true'
+    document.head.appendChild(script)
+  }
+
   const voiceMap = {
     zm_yunxi: 'am_liam',
     zm_yunjian: 'am_michael',
