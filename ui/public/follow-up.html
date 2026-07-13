@@ -5,20 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>获取方案与后续联系 · 木地板 AI 选购顾问</title>
     <style>
-      :root {
-        font-family: Inter, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
-        color: #35251e;
-        background: #f4eee7;
-      }
+      :root { font-family: Inter, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; color: #35251e; background: #f4eee7; }
       * { box-sizing: border-box; }
-      body {
-        min-height: 100vh;
-        margin: 0;
-        background:
-          radial-gradient(circle at 10% 0%, rgba(203, 151, 111, .26), transparent 34%),
-          radial-gradient(circle at 95% 95%, rgba(101, 137, 102, .18), transparent 31%),
-          #f6f0e9;
-      }
+      body { min-height: 100vh; margin: 0; background: radial-gradient(circle at 10% 0%, rgba(203,151,111,.26), transparent 34%), radial-gradient(circle at 95% 95%, rgba(101,137,102,.18), transparent 31%), #f6f0e9; }
       button, input, select, textarea { font: inherit; }
       .shell { width: min(900px, calc(100% - 28px)); margin: 0 auto; padding: 30px 0 60px; }
       .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
@@ -66,6 +55,8 @@
       .small { color: #948279; font-size: 12px; text-align: center; line-height: 1.6; }
       @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } .actions button { width: 100%; } }
     </style>
+    <script src="/bilingual-ui.js"></script>
+    <script src="/bilingual-pages.js"></script>
   </head>
   <body>
     <main class="shell">
@@ -87,10 +78,7 @@
             <p id="session-summary">正在读取当前咨询 Session…</p>
           </section>
 
-          <div class="privacy">
-            真实联系方式不会发送给 Terra、Qwen 或任何 LLM。LLM 最多只知道“客户是否已经授权联系”，不会看到手机号、微信号、邮箱或客户姓名。
-          </div>
-
+          <div class="privacy">真实联系方式不会发送给 Terra、Qwen 或任何 LLM。LLM 最多只知道“客户是否已经授权联系”，不会看到手机号、微信号、邮箱或客户姓名。</div>
           <div id="status" class="status" role="status" aria-live="polite"></div>
 
           <section id="existing" class="existing">
@@ -105,29 +93,13 @@
 
           <form id="lead-form">
             <div class="grid">
-              <label class="field">
-                <span>称呼（可选）</span>
-                <input id="display-name" maxlength="80" placeholder="例如：王先生" autocomplete="name" />
-              </label>
-              <label class="field">
-                <span>联系方式类型</span>
-                <select id="contact-channel">
-                  <option value="phone">手机</option>
-                  <option value="wechat">微信</option>
-                  <option value="email">邮箱</option>
-                </select>
-              </label>
+              <label class="field"><span>称呼（可选）</span><input id="display-name" maxlength="80" placeholder="例如：王先生" autocomplete="name" /></label>
+              <label class="field"><span>联系方式类型</span><select id="contact-channel"><option value="phone">手机</option><option value="wechat">微信</option><option value="email">邮箱</option></select></label>
             </div>
 
             <div class="grid">
-              <label class="field">
-                <span>联系方式</span>
-                <input id="contact-value" maxlength="120" placeholder="请输入手机号" autocomplete="tel" required />
-              </label>
-              <label class="field">
-                <span>方便联系的时间（可选）</span>
-                <input id="preferred-time" maxlength="80" placeholder="例如：工作日下午 3 点后" />
-              </label>
+              <label class="field"><span>联系方式</span><input id="contact-value" maxlength="120" placeholder="请输入手机号" autocomplete="tel" required /></label>
+              <label class="field"><span>方便联系的时间（可选）</span><input id="preferred-time" maxlength="80" placeholder="例如：工作日下午 3 点后" /></label>
             </div>
 
             <div class="purpose-box">
@@ -139,22 +111,11 @@
               </div>
             </div>
 
-            <label class="consent">
-              <input id="contact-opt-in" type="checkbox" />
-              <span><strong>本次方案联系授权（必选）</strong>我同意门店仅为发送本次方案、报价、样板或到店安排而联系我。我可以随时撤回并删除数据。</span>
-            </label>
+            <label class="consent"><input id="contact-opt-in" type="checkbox" /><span><strong>本次方案联系授权（必选）</strong>我同意门店仅为发送本次方案、报价、样板或到店安排而联系我。我可以随时撤回并删除数据。</span></label>
+            <label class="consent"><input id="marketing-opt-in" type="checkbox" /><span><strong>新品与优惠信息授权（可选）</strong>我另外同意接收后续新品和优惠信息。未勾选不会影响获取本次方案。</span></label>
 
-            <label class="consent">
-              <input id="marketing-opt-in" type="checkbox" />
-              <span><strong>新品与优惠信息授权（可选）</strong>我另外同意接收后续新品和优惠信息。未勾选不会影响获取本次方案。</span>
-            </label>
-
-            <div class="actions">
-              <button id="submit" class="primary" type="submit" disabled>保存授权并安排后续</button>
-              <a class="back" href="/">暂不留下联系方式</a>
-            </div>
+            <div class="actions"><button id="submit" class="primary" type="submit" disabled>保存授权并安排后续</button><a class="back" href="/">暂不留下联系方式</a></div>
           </form>
-
           <p class="small">Demo 默认在授权后三天生成一次本地跟进提醒。它不会自动发送短信、微信或邮件；门店人员必须在本地工作台确认后执行。</p>
         </div>
       </section>
@@ -165,7 +126,6 @@
         const params = new URLSearchParams(location.search)
         const API_BASE = (params.get('api') || 'http://127.0.0.1:8000').replace(/\/$/, '')
         const sessionId = params.get('session_id') || sessionStorage.getItem('woodfloor_active_session_id') || ''
-
         const summary = document.getElementById('session-summary')
         const status = document.getElementById('status')
         const form = document.getElementById('lead-form')
@@ -183,10 +143,7 @@
         const deleteContact = document.getElementById('delete-contact')
         let busy = false
 
-        function setStatus(kind, message) {
-          status.className = `status visible ${kind}`
-          status.textContent = message
-        }
+        function setStatus(kind, message) { status.className = `status visible ${kind}`; status.textContent = message }
         function setBusy(value) {
           busy = value
           for (const item of form.querySelectorAll('input,select,button')) item.disabled = value || (item === submit && !contactOptIn.checked)
@@ -196,19 +153,14 @@
         }
         function updateSubmit() { submit.disabled = busy || !contactOptIn.checked || !contactValue.value.trim() || !sessionId }
         async function request(path, init = {}) {
-          const response = await fetch(`${API_BASE}${path}`, {
-            ...init,
-            headers: { 'Content-Type': 'application/json; charset=utf-8', ...(init.headers || {}) },
-          })
+          const response = await fetch(`${API_BASE}${path}`, { ...init, headers: { 'Content-Type': 'application/json; charset=utf-8', ...(init.headers || {}) } })
           const text = await response.text()
           let data = null
           try { data = text ? JSON.parse(text) : null } catch { data = { detail: text } }
           if (!response.ok) throw new Error(data?.detail || `${response.status} ${response.statusText}`)
           return data
         }
-        function purposes() {
-          return ['发送本次选购方案', ...Array.from(document.querySelectorAll('.purpose:checked')).map((item) => item.value)]
-        }
+        function purposes() { return ['发送本次选购方案', ...Array.from(document.querySelectorAll('.purpose:checked')).map((item) => item.value)] }
         function channelPlaceholder() {
           const map = { phone: ['请输入手机号', 'tel'], wechat: ['请输入微信号', 'off'], email: ['请输入邮箱', 'email'] }
           const value = map[channel.value] || map.phone
@@ -228,9 +180,7 @@
             summary.textContent = profile.conversation_summary || '当前 Session 已建立，但需求摘要尚未形成。您仍可返回导购继续咨询。'
             const saved = await request(`/api/leads/contact/status?session_id=${encodeURIComponent(sessionId)}`)
             if (saved.exists && saved.lead) showExisting(saved.lead)
-          } catch (error) {
-            setStatus('error', `读取 Session 失败：${error.message}`)
-          }
+          } catch (error) { setStatus('error', `读取 Session 失败：${error.message}`) }
           updateSubmit()
         }
         function showExisting(lead) {
@@ -240,15 +190,11 @@
         async function updateConsent(contact, marketing) {
           setBusy(true)
           try {
-            const result = await request('/api/leads/contact/consent', {
-              method: 'PATCH',
-              body: JSON.stringify({ session_id: sessionId, contact_opt_in: contact, marketing_opt_in: marketing }),
-            })
+            const result = await request('/api/leads/contact/consent', { method: 'PATCH', body: JSON.stringify({ session_id: sessionId, contact_opt_in: contact, marketing_opt_in: marketing }) })
             showExisting(result.lead)
             setStatus('success', result.message)
-          } catch (error) {
-            setStatus('error', `更新授权失败：${error.message}`)
-          } finally { setBusy(false); updateSubmit() }
+          } catch (error) { setStatus('error', `更新授权失败：${error.message}`) }
+          finally { setBusy(false); updateSubmit() }
         }
         form.addEventListener('submit', async (event) => {
           event.preventDefault()
@@ -271,9 +217,8 @@
             })
             showExisting(result.lead)
             setStatus('success', result.message + ' 默认三天后会在本地工作台生成跟进提醒。')
-          } catch (error) {
-            setStatus('error', `保存失败：${error.message}`)
-          } finally { setBusy(false); updateSubmit() }
+          } catch (error) { setStatus('error', `保存失败：${error.message}`) }
+          finally { setBusy(false); updateSubmit() }
         })
         disableMarketing.addEventListener('click', () => void updateConsent(true, false))
         revokeAll.addEventListener('click', () => void updateConsent(false, false))
@@ -284,9 +229,8 @@
             const result = await request('/api/leads/contact', { method: 'DELETE', body: JSON.stringify({ session_id: sessionId }) })
             existing.classList.remove('visible')
             setStatus(result.deleted ? 'success' : 'info', result.message)
-          } catch (error) {
-            setStatus('error', `删除失败：${error.message}`)
-          } finally { setBusy(false); updateSubmit() }
+          } catch (error) { setStatus('error', `删除失败：${error.message}`) }
+          finally { setBusy(false); updateSubmit() }
         })
         channel.addEventListener('change', channelPlaceholder)
         contactValue.addEventListener('input', updateSubmit)
