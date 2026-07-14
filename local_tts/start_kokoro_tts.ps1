@@ -76,6 +76,7 @@ $env:KOKORO_ZH_SPEED = $ChineseSpeed.ToString($InvariantCulture)
 $env:KOKORO_EN_SPEED = $EnglishSpeed.ToString($InvariantCulture)
 $env:KOKORO_ZH_MAX_CHARS = $ChineseChunkChars.ToString($InvariantCulture)
 $env:KOKORO_ZH_PROSODY_MODE = $ChineseProsodyMode
+$env:KOKORO_ZH_TRANSLITERATE_LATIN = 'true'
 $env:KOKORO_ZH_VOICE_SPEEDS = 'zm_yunxi=0.86,zm_yunjian=0.84,zm_yunxia=0.90,zm_yunyang=0.87'
 $env:KOKORO_LEGACY_SPEED_ONE_USES_DEFAULT = 'true'
 $env:KOKORO_CLAUSE_PAUSE_MS = '0'
@@ -96,6 +97,7 @@ Write-Host "Mandarin per-voice speeds: $($env:KOKORO_ZH_VOICE_SPEEDS)" -Foregrou
 Write-Host "English speed: $($env:KOKORO_EN_SPEED)" -ForegroundColor Cyan
 Write-Host "Mandarin max characters per chunk: $ChineseChunkChars" -ForegroundColor Cyan
 Write-Host "Mandarin prosody mode: $ChineseProsodyMode" -ForegroundColor Cyan
+Write-Host 'Mandarin Latin acronym pronunciation: enabled (for example SPC, AC5, ENF, AI)' -ForegroundColor Cyan
 Write-Host 'Artificial punctuation silence: disabled' -ForegroundColor Cyan
 Write-Host 'Chunk-edge silence trim: -46 dB threshold with 20 ms natural padding' -ForegroundColor Cyan
 Write-Host 'Chunk crossfade: 4 ms' -ForegroundColor Cyan
