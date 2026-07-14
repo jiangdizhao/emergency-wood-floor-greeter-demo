@@ -5,7 +5,7 @@ param(
     [string]$PythonExe = '',
     [double]$ChineseSpeed = 0.84,
     [double]$EnglishSpeed = 0.92,
-    [int]$ChineseChunkChars = 48
+    [int]$ChineseChunkChars = 88
 )
 
 $ErrorActionPreference = 'Stop'
@@ -64,8 +64,8 @@ if ($ChineseSpeed -lt 0.65 -or $ChineseSpeed -gt 1.25) {
 if ($EnglishSpeed -lt 0.65 -or $EnglishSpeed -gt 1.25) {
     throw 'EnglishSpeed must be between 0.65 and 1.25.'
 }
-if ($ChineseChunkChars -lt 24 -or $ChineseChunkChars -gt 96) {
-    throw 'ChineseChunkChars must be between 24 and 96.'
+if ($ChineseChunkChars -lt 24 -or $ChineseChunkChars -gt 120) {
+    throw 'ChineseChunkChars must be between 24 and 120.'
 }
 
 $resolvedPython = Resolve-KokoroPython -ExplicitPythonExe $PythonExe -EnvName $CondaEnvName
@@ -75,6 +75,8 @@ $env:KOKORO_ZH_SPEED = $ChineseSpeed.ToString($InvariantCulture)
 $env:KOKORO_EN_SPEED = $EnglishSpeed.ToString($InvariantCulture)
 $env:KOKORO_ZH_MAX_CHARS = $ChineseChunkChars.ToString($InvariantCulture)
 $env:KOKORO_LEGACY_SPEED_ONE_USES_DEFAULT = 'true'
+$env:KOKORO_CLAUSE_PAUSE_MS = '0'
+$env:KOKORO_SENTENCE_PAUSE_MS = '0'
 
 Write-Host 'Starting local Kokoro TTS server...' -ForegroundColor Green
 Write-Host "Host: $HostAddress" -ForegroundColor Cyan
@@ -85,6 +87,7 @@ Write-Host "Python: $resolvedPython" -ForegroundColor Cyan
 Write-Host "Mandarin speed: $($env:KOKORO_ZH_SPEED) (lower is slower)" -ForegroundColor Cyan
 Write-Host "English speed: $($env:KOKORO_EN_SPEED) (lower is slower)" -ForegroundColor Cyan
 Write-Host "Mandarin max characters per chunk: $ChineseChunkChars" -ForegroundColor Cyan
+Write-Host 'Artificial punctuation pauses: disabled' -ForegroundColor Cyan
 Write-Host ''
 
 Write-Host 'Python executable:' -ForegroundColor Yellow
