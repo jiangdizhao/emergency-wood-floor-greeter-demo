@@ -1,16 +1,19 @@
 # Emergency Wood Floor Greeter Demo
 
-面向木地板门店的客户交互 Demo，包含：
+面向木地板门店的双语虚拟导购 Demo，包含：
 
-- 中文语音识别与文字输入；
-- Terra 云端模式和 Qwen 3.5 本地模式两套平行 LLM 架构；
-- 本地确定性产品推荐与对比；
-- Kokoro 本地中文语音合成；
-- OpenCV + MediaPipe 视觉服务；
+- 一键中文/英文切换；
+- 浏览器语音识别、文字输入和 Kokoro 本地中英文语音合成；
+- GPT-5.6 Terra 云端模式与 Qwen 3.5 本地模式两套平行 LLM 架构；
+- 本地确定性产品推荐、产品对比、高级销售策略和受控促销；
+- OpenCV + MediaPipe 后台视觉服务；
 - YuNet + SFace 本地人脸注册、回访识别和历史记忆恢复；
-- 用户自助删除本地人脸特征、客户档案和历史咨询记录。
+- 本地 SQLite CRM、联系方式授权和跟进提醒；
+- 用户自助删除本地人脸特征、客户档案、联系方式和历史咨询记录。
 
-## 重要架构原则
+---
+
+# 重要架构原则
 
 Terra 和 Qwen 是两套相互独立的运行模式：
 
@@ -28,62 +31,83 @@ Qwen 解析客户意图
 → Qwen 生成自然语言回答
 ```
 
-两种模式均遵守以下约束：
+两种模式均遵守：
 
 - LLM 不直接修改数据库；
 - LLM 不直接选择产品 SKU；
-- 产品数据库、客户档案和人脸特征保存在本机；
-- Terra 仅接收生成当前回答所需的最小上下文；
+- 产品数据库、客户档案、人脸特征和 CRM 数据保存在本机；
+- Terra 只接收生成当前回答所需的最小上下文；
+- 联系方式不会发送给 Terra 或 Qwen；
 - 不启用隐藏的 Terra ↔ Qwen 跨模型自动 fallback；
-- 当前 Session 使用哪个 Provider，就始终使用该 Provider。
+- 当前 Session 选择哪个 Provider，就始终使用该 Provider。
 
 ---
 
-# 一、首次部署
+# 一、目录与运行环境
 
-以下命令以项目位于：
+以下命令假设项目位于：
 
 ```text
 F:\emergency-wood-floor-greeter-demo
 ```
 
-为例。
+Backend Conda 环境：
 
-## 1. 拉取最新代码
+```text
+smartoffice
+```
+
+Kokoro Conda 环境：
+
+```text
+kokoro-tts
+```
+
+完整程序通常使用 4 个 PowerShell Terminal：
+
+```text
+Terminal 1：Kokoro 本地 TTS，端口 8010
+Terminal 2：Ollama，仅 Qwen 模式需要，端口 11434
+Terminal 3：FastAPI Backend，端口 8000
+Terminal 4：Vite Frontend，端口 5173
+```
+
+推荐启动顺序：
+
+```text
+Kokoro
+→ Ollama（仅 Qwen）
+→ Backend
+→ Frontend
+```
+
+Terra 模式不需要 Ollama，因此可以省略 Terminal 2。
+
+---
+
+# 二、首次部署
+
+## 1. 拉取代码
 
 ```powershell
 cd F:\emergency-wood-floor-greeter-demo
-git pull
+git pull --ff-only
 ```
 
 ## 2. Backend Python 环境
 
-当前本机实际使用的环境示例为：
-
 ```powershell
 conda activate smartoffice
 ```
 
-如果你的环境仍命名为 `woodfloor`，把后续命令中的：
-
-```powershell
-conda activate smartoffice
-```
-
-替换为：
-
-```powershell
-conda activate woodfloor
-```
-
-只在新环境首次安装时执行：
+只在首次安装或 `requirements.txt` 更新后执行：
 
 ```powershell
 cd F:\emergency-wood-floor-greeter-demo\backend
 python -m pip install -r requirements.txt
 ```
 
-不要对已经正常工作的视觉环境执行 `--force-reinstall`。当前验证过的固定版本为：
+不要对已经正常工作的视觉环境执行 `--force-reinstall`。当前固定版本包括：
 
 ```text
 mediapipe==0.10.13
@@ -100,7 +124,7 @@ cd F:\emergency-wood-floor-greeter-demo\backend
 powershell -ExecutionPolicy Bypass -File .\scripts\download_face_models.ps1
 ```
 
-模型保存在：
+模型位置：
 
 ```text
 backend/app/data/models/face_detection_yunet_2023mar.onnx
@@ -109,8 +133,6 @@ backend/app/data/models/face_recognition_sface_2021dec.onnx
 
 ## 4. 安装 Frontend 依赖
 
-只需首次执行，或 `package.json` 更新后执行：
-
 ```powershell
 cd F:\emergency-wood-floor-greeter-demo\ui
 npm install
@@ -118,7 +140,7 @@ npm install
 
 ## 5. 准备 Qwen 模型
 
-只在使用 Qwen 模式时需要：
+仅 Qwen 模式需要：
 
 ```powershell
 ollama pull qwen3.5:4b
@@ -133,36 +155,30 @@ qwen3.5:4b
 
 ---
 
-# 二、启动顺序总览
-
-完整程序通常使用 4 个 PowerShell Terminal：
-
-```text
-Terminal 1：Kokoro 本地 TTS
-Terminal 2：Ollama，仅 Qwen 模式需要
-Terminal 3：FastAPI Backend，并在这里选择 Terra 或 Qwen
-Terminal 4：Vite Frontend
-```
-
-Terra 模式不要求 Ollama 运行，因此可以省略 Terminal 2。
-
-推荐启动顺序：
-
-```text
-Kokoro
-→ Ollama（仅 Qwen）
-→ Backend
-→ Frontend
-```
-
----
-
 # 三、Terminal 1：启动 Kokoro 本地 TTS
+
+不要把 Kokoro 安装进 `smartoffice` 环境。它使用独立的 `kokoro-tts` 环境。
 
 ```powershell
 cd F:\emergency-wood-floor-greeter-demo\local_tts
-conda activate kokoro-tts
-powershell -ExecutionPolicy Bypass -File .\start_kokoro_tts.ps1
+
+powershell -ExecutionPolicy Bypass `
+  -File .\start_kokoro_tts.ps1
+```
+
+启动脚本会主动定位：
+
+```text
+D:\anaconda3\envs\kokoro-tts\python.exe
+```
+
+当前默认语音配置：
+
+```text
+中文速度：0.84
+英文速度：0.92
+中文安全分块：88 字符
+人工标点停顿：关闭
 ```
 
 健康检查：
@@ -171,22 +187,21 @@ powershell -ExecutionPolicy Bypass -File .\start_kokoro_tts.ps1
 Invoke-RestMethod `
   -Uri "http://127.0.0.1:8010/health" `
   -Method Get |
-ConvertTo-Json -Depth 10
+ConvertTo-Json -Depth 30
 ```
 
-也可以运行自带 smoke test：
+重点检查：
 
-```powershell
-cd F:\emergency-wood-floor-greeter-demo\local_tts
-powershell -ExecutionPolicy Bypass -File .\smoke_test_kokoro_tts.ps1
-
-powershell -ExecutionPolicy Bypass `
-  -File .\smoke_test_kokoro_tts.ps1 `
-  -Language zh `
-  -OutFile .\kokoro_zh_test.wav
+```text
+version = 0.5.1
+warmup_ready = true
+default_zh_speed = 0.84
+default_en_speed = 0.92
+clause_pause_ms = 0
+sentence_pause_ms = 0
 ```
 
-本 Demo 使用的中文男声包括：
+中文声音：
 
 ```text
 zm_yunxi
@@ -195,33 +210,286 @@ zm_yunxia
 zm_yunyang
 ```
 
+英文声音：
+
+```text
+am_liam
+am_michael
+am_puck
+am_onyx
+```
+
+长中文介绍验证：
+
+```powershell
+cd F:\emergency-wood-floor-greeter-demo\local_tts
+
+& "D:\anaconda3\envs\kokoro-tts\python.exe" `
+  .\verify_long_mandarin_intro.py
+```
+
+成功时应显示：
+
+```text
+PASS: long Mandarin text uses safe chunks, slower speech, and no artificial punctuation pauses.
+```
+
 ---
 
-# 四、选择并启动 LLM
+# 四、Terminal 3：启动 Backend
 
-## 方案 A：Qwen 3.5 本地模式
+## Backend 启动的关键规则
 
-适用特点：
+1. Provider、模型、API Key 和 timeout 等环境变量，必须在启动 Backend 的同一个 PowerShell 进程中设置。
+2. 修改环境变量后，必须停止并重新启动 Backend。
+3. `DEFAULT_DIALOGUE_PROVIDER` 只影响之后新创建的 Session；切换模式后应在前端点击“重新开始”。
+4. 不要只执行：
 
-- 全部 LLM 推理在本机执行；
-- 不依赖 OpenAI 网络服务；
-- 没有按次 API 成本；
-- 受本机 GPU、显存和散热影响，响应速度和复杂语义理解弱于 Terra。
+```powershell
+$secureKey = Read-Host "OpenAI API key" -AsSecureString
+```
 
-## Terminal 2：启动 Ollama
+这一步只创建 `$secureKey` 变量，并不会自动设置 `OPENAI_API_KEY`。
+5. 不要把真实 API Key 写进 README、代码、脚本、`.env` 或 Git。
 
-先检查 Ollama 是否已经运行：
+---
+
+## 方案 A：GPT-5.6 Terra 云端模式
+
+### 推荐启动方式：使用安全启动脚本
+
+这是最稳妥的 Terra 启动方法。脚本会：
+
+- 使用安全输入框读取 API Key；
+- 将 Key 注入当前 Backend 进程；
+- 不打印 Key 内容；
+- 设置 `DEFAULT_DIALOGUE_PROVIDER=terra`；
+- 设置 `OPENAI_DIALOGUE_MODEL=gpt-5.6-terra`；
+- 设置解析和生成 timeout；
+- 使用 `smartoffice` 环境中的 Python 启动 Uvicorn；
+- Key 为空时直接拒绝启动。
+
+执行：
+
+```powershell
+cd F:\emergency-wood-floor-greeter-demo\backend
+
+powershell -ExecutionPolicy Bypass `
+  -File .\scripts\start_backend_terra.ps1
+```
+
+出现提示后粘贴 API Key：
+
+```text
+OpenAI API key: ********
+```
+
+正常启动时应显示：
+
+```text
+Starting Backend in Terra mode...
+Python: D:\anaconda3\envs\smartoffice\python.exe
+Model: gpt-5.6-terra
+OPENAI_API_KEY: configured (value hidden)
+Local TTS: http://127.0.0.1:8010/tts
+```
+
+脚本默认等价于：
+
+```text
+Provider: terra
+Model: gpt-5.6-terra
+Parse timeout: 12 seconds
+Render timeout: 15 seconds
+Host: 127.0.0.1
+Port: 8000
+Reload: enabled
+```
+
+自定义 timeout：
+
+```powershell
+powershell -ExecutionPolicy Bypass `
+  -File .\scripts\start_backend_terra.ps1 `
+  -ParseTimeoutSeconds 20 `
+  -RenderTimeoutSeconds 25
+```
+
+关闭自动 reload：
+
+```powershell
+powershell -ExecutionPolicy Bypass `
+  -File .\scripts\start_backend_terra.ps1 `
+  -NoReload
+```
+
+明确指定 Python：
+
+```powershell
+powershell -ExecutionPolicy Bypass `
+  -File .\scripts\start_backend_terra.ps1 `
+  -PythonExe "D:\anaconda3\envs\smartoffice\python.exe"
+```
+
+### 手动启动 Terra
+
+只有在调试启动脚本时才建议使用手动方式。
+
+```powershell
+cd F:\emergency-wood-floor-greeter-demo\backend
+conda activate smartoffice
+
+$secureKey = Read-Host "OpenAI API key" -AsSecureString
+
+$env:OPENAI_API_KEY = `
+  [System.Net.NetworkCredential]::new("", $secureKey).Password
+
+Remove-Variable secureKey
+
+$env:DEFAULT_DIALOGUE_PROVIDER="terra"
+$env:OPENAI_DIALOGUE_MODEL="gpt-5.6-terra"
+$env:OPENAI_PARSE_TIMEOUT_SECONDS="12"
+$env:OPENAI_RENDER_TIMEOUT_SECONDS="15"
+$env:OPENAI_BASE_URL="https://api.openai.com/v1"
+
+$env:LOCAL_TTS_URL="http://127.0.0.1:8010/tts"
+$env:LOCAL_TTS_HEALTH_URL="http://127.0.0.1:8010/health"
+
+if ($env:OPENAI_API_KEY) {
+    Write-Host "OPENAI_API_KEY is set"
+} else {
+    throw "OPENAI_API_KEY is missing"
+}
+
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+可选项目或组织配置，仅在账户明确要求时设置：
+
+```powershell
+$env:OPENAI_PROJECT_ID="your-project-id"
+$env:OPENAI_ORG_ID="your-organization-id"
+```
+
+### 检查 Terra Provider
+
+在另一个 PowerShell 中执行：
+
+```powershell
+Invoke-RestMethod `
+  -Uri "http://127.0.0.1:8000/api/llm/status" `
+  -Method Get |
+ConvertTo-Json -Depth 30
+```
+
+应看到：
+
+```text
+providers.terra.configured = true
+providers.terra.available = true
+providers.terra.model = gpt-5.6-terra
+```
+
+如果看到：
+
+```text
+OPENAI_API_KEY is not configured for Terra mode
+```
+
+说明 Key 没有进入启动 Uvicorn 的进程。停止 Backend，并使用 `start_backend_terra.ps1` 重新启动。
+
+### 确认新 Session 使用 Terra
+
+```powershell
+$body = @{
+  provider_mode = $null
+} | ConvertTo-Json
+
+$session = Invoke-RestMethod `
+  -Uri "http://127.0.0.1:8000/api/identity/session/new" `
+  -Method Post `
+  -ContentType "application/json; charset=utf-8" `
+  -Body $body
+
+$session | ConvertTo-Json -Depth 20
+```
+
+应看到：
+
+```text
+provider_mode = terra
+provider_label = Cloud Intelligence · Terra
+```
+
+### Terra 常见错误
+
+#### `OPENAI_API_KEY is not configured`
+
+原因：
+
+- 只读取了 `$secureKey`，没有设置 `$env:OPENAI_API_KEY`；
+- Key 在另一个 PowerShell 中设置；
+- 设置 Key 后没有重启 Backend；
+- Uvicorn reload 子进程启动前环境变量已丢失。
+
+解决：
+
+```powershell
+Ctrl+C
+
+powershell -ExecutionPolicy Bypass `
+  -File .\scripts\start_backend_terra.ps1
+```
+
+#### `OpenAI HTTP 401`
+
+通常表示 Key 无效、过期或粘贴错误。重新启动脚本并重新输入 Key。
+
+#### `OpenAI HTTP 403`
+
+通常表示项目、组织或模型权限问题。检查账户是否有权访问指定模型，并确认可选的 `OPENAI_PROJECT_ID` 或 `OPENAI_ORG_ID` 是否正确。
+
+#### `OpenAI HTTP 404`
+
+通常表示模型名或 Base URL 不正确。当前 Demo 默认：
+
+```text
+OPENAI_DIALOGUE_MODEL = gpt-5.6-terra
+OPENAI_BASE_URL = https://api.openai.com/v1
+```
+
+#### `OpenAI request failed: ... timeout`
+
+提高 timeout：
+
+```powershell
+powershell -ExecutionPolicy Bypass `
+  -File .\scripts\start_backend_terra.ps1 `
+  -ParseTimeoutSeconds 25 `
+  -RenderTimeoutSeconds 30
+```
+
+---
+
+## 方案 B：Qwen 3.5 本地模式
+
+### 启动或检查 Ollama
+
+如果 Windows Ollama 桌面程序已经运行，不要再启动第二个服务。
+
+检查：
 
 ```powershell
 Invoke-RestMethod `
   -Uri "http://127.0.0.1:11434/api/tags" `
   -Method Get |
-ConvertTo-Json -Depth 10
+ConvertTo-Json -Depth 20
+
+ollama list
+ollama ps
 ```
 
-如果 Windows Ollama 桌面程序已经运行，不要再启动第二个服务。
-
-如果 Ollama 尚未运行，可以打开新的 PowerShell，并执行：
+如果 Ollama 尚未运行：
 
 ```powershell
 $env:OLLAMA_MODELS="F:\ollama-models"
@@ -234,22 +502,7 @@ $env:OLLAMA_NO_CLOUD="1"
 ollama serve
 ```
 
-在另一个 Terminal 检查：
-
-```powershell
-ollama list
-ollama ps
-```
-
-如果模型尚未下载：
-
-```powershell
-ollama pull qwen3.5:4b
-```
-
-## Terminal 3：以 Qwen 模式启动 Backend
-
-所有环境变量必须在启动 `uvicorn` 的同一个 PowerShell 中设置：
+### 以 Qwen 模式启动 Backend
 
 ```powershell
 cd F:\emergency-wood-floor-greeter-demo\backend
@@ -269,32 +522,32 @@ $env:LOCAL_TTS_HEALTH_URL="http://127.0.0.1:8010/health"
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-最关键的选择命令是：
+关键选择变量：
 
 ```powershell
 $env:DEFAULT_DIALOGUE_PROVIDER="qwen"
 ```
 
-即使当前 PowerShell 中存在 `OPENAI_API_KEY`，显式设置为 `qwen` 后，新创建的咨询 Session 仍使用 Qwen。
+即使当前 PowerShell 中存在 `OPENAI_API_KEY`，显式选择 `qwen` 后，新 Session 仍使用 Qwen。
 
-### 检查 Qwen Provider 状态
+检查：
 
 ```powershell
 Invoke-RestMethod `
   -Uri "http://127.0.0.1:8000/api/llm/status" `
   -Method Get |
-ConvertTo-Json -Depth 20
+ConvertTo-Json -Depth 30
 ```
 
-在 `providers.qwen` 中应看到：
+应看到：
 
 ```text
-available = true
-model = qwen3.5:4b
-model_present = true
+providers.qwen.available = true
+providers.qwen.model = qwen3.5:4b
+providers.qwen.model_present = true
 ```
 
-创建一个临时新 Session，确认默认模式确实是 Qwen：
+确认新 Session：
 
 ```powershell
 $body = @{
@@ -319,132 +572,9 @@ provider_label = Private Local AI · Qwen 3.5
 
 ---
 
-## 方案 B：GPT-5.6 Terra 云端模式
-
-适用特点：
-
-- 对复杂中文表达、否定、修正和上下文理解更稳定；
-- 回答更自然；
-- 需要互联网连接和 OpenAI API Key；
-- 会产生 API 调用费用；
-- 本地产品数据库、人脸向量和完整客户历史不会发送给 Terra。
-
-Terra 模式不需要 Ollama，可以直接启动 Backend。
-
-## Terminal 3：安全设置 API Key
-
-不要把真实 Key 写入 README、代码、PowerShell 脚本或 Git。
-
-在启动 Backend 的同一个 PowerShell 中执行：
-
-```powershell
-$secureKey = Read-Host "OpenAI API key" -AsSecureString
-
-$env:OPENAI_API_KEY = `
-  [System.Net.NetworkCredential]::new("", $secureKey).Password
-
-Remove-Variable secureKey
-```
-
-检查 Key 是否已经设置，但不要打印 Key 内容：
-
-```powershell
-if ($env:OPENAI_API_KEY) {
-    Write-Host "OPENAI_API_KEY is set"
-} else {
-    Write-Host "OPENAI_API_KEY is missing"
-}
-```
-
-## 以 Terra 模式启动 Backend
-
-```powershell
-cd F:\emergency-wood-floor-greeter-demo\backend
-conda activate smartoffice
-
-$env:DEFAULT_DIALOGUE_PROVIDER="terra"
-$env:OPENAI_DIALOGUE_MODEL="gpt-5.6-terra"
-$env:OPENAI_PARSE_TIMEOUT_SECONDS="12"
-$env:OPENAI_RENDER_TIMEOUT_SECONDS="15"
-
-$env:LOCAL_TTS_URL="http://127.0.0.1:8010/tts"
-$env:LOCAL_TTS_HEALTH_URL="http://127.0.0.1:8010/health"
-
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-最关键的选择命令是：
-
-```powershell
-$env:DEFAULT_DIALOGUE_PROVIDER="terra"
-```
-
-Terra 模型名称由以下变量指定：
-
-```powershell
-$env:OPENAI_DIALOGUE_MODEL="gpt-5.6-terra"
-```
-
-### 可选 OpenAI 项目配置
-
-只有账户环境确实需要时才设置：
-
-```powershell
-$env:OPENAI_PROJECT_ID="your-project-id"
-$env:OPENAI_ORG_ID="your-organization-id"
-```
-
-通常不需要修改：
-
-```powershell
-$env:OPENAI_BASE_URL="https://api.openai.com/v1"
-```
-
-### 检查 Terra Provider 状态
-
-```powershell
-Invoke-RestMethod `
-  -Uri "http://127.0.0.1:8000/api/llm/status" `
-  -Method Get |
-ConvertTo-Json -Depth 20
-```
-
-在 `providers.terra` 中应看到：
-
-```text
-configured = true
-available = true
-model = gpt-5.6-terra
-```
-
-创建一个临时新 Session，确认默认模式确实是 Terra：
-
-```powershell
-$body = @{
-  provider_mode = $null
-} | ConvertTo-Json
-
-$session = Invoke-RestMethod `
-  -Uri "http://127.0.0.1:8000/api/identity/session/new" `
-  -Method Post `
-  -ContentType "application/json; charset=utf-8" `
-  -Body $body
-
-$session | ConvertTo-Json -Depth 20
-```
-
-应看到：
-
-```text
-provider_mode = terra
-provider_label = Cloud Intelligence · Terra
-```
-
----
-
 # 五、Terminal 4：启动 Frontend
 
-先确认 Kokoro 和 Backend 已经启动，再执行：
+先确认 Kokoro 与 Backend 已启动：
 
 ```powershell
 cd F:\emergency-wood-floor-greeter-demo\ui
@@ -460,99 +590,70 @@ npm run dev -- --host 127.0.0.1
 http://127.0.0.1:5173/
 ```
 
-推荐使用：
+推荐浏览器：
 
 ```text
 Google Chrome
 Microsoft Edge
 ```
 
-因为语音识别依赖浏览器 Web Speech API。
+语音识别依赖浏览器 Web Speech API。
 
-每次切换 Terra/Qwen、更新前端代码或遇到旧页面状态时：
+更新前端或切换语言后：
 
 ```text
 1. Ctrl+C 停止旧 Vite
 2. 重新运行 npm run dev
 3. 关闭旧浏览器标签
-4. 重新打开页面，或使用 Ctrl+F5 强制刷新
+4. 重新打开页面
+5. Ctrl+F5 强制刷新
 ```
 
 ---
 
-# 六、如何在 Terra 和 Qwen 之间切换
+# 六、在 Terra 和 Qwen 之间切换
 
-## 推荐方式：重启 Backend 并设置默认 Provider
+推荐方式是停止 Backend，然后按目标模式重新启动。
 
-从 Qwen 切换到 Terra：
+## Qwen → Terra
 
 ```powershell
-# 在 Backend Terminal 中先 Ctrl+C
+# 在 Backend Terminal 中按 Ctrl+C
 
-$env:DEFAULT_DIALOGUE_PROVIDER="terra"
-$env:OPENAI_DIALOGUE_MODEL="gpt-5.6-terra"
+cd F:\emergency-wood-floor-greeter-demo\backend
 
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+powershell -ExecutionPolicy Bypass `
+  -File .\scripts\start_backend_terra.ps1
 ```
 
-从 Terra 切换到 Qwen：
+## Terra → Qwen
 
 ```powershell
-# 在 Backend Terminal 中先 Ctrl+C
+# 在 Backend Terminal 中按 Ctrl+C
+
+cd F:\emergency-wood-floor-greeter-demo\backend
+conda activate smartoffice
 
 $env:DEFAULT_DIALOGUE_PROVIDER="qwen"
 $env:OLLAMA_DIALOGUE_MODEL="qwen3.5:4b"
+$env:OLLAMA_BASE_URL="http://127.0.0.1:11434"
 
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-切换后，在前端点击：
+切换后在前端点击：
 
 ```text
 重新开始
 ```
 
-或刷新欢迎页并创建新的咨询。
+或刷新欢迎页创建新 Session。
 
-`DEFAULT_DIALOGUE_PROVIDER` 影响后续新创建的 Session，不会偷偷修改已经存在的 Session。
-
-## 针对一个已知 Session 临时切换
-
-仅用于调试。先获得实际 `session_id`，然后执行：
-
-```powershell
-$sessionId = "session-replace-with-real-id"
-
-$body = @{
-  session_id = $sessionId
-  provider_mode = "qwen"
-} | ConvertTo-Json
-
-Invoke-RestMethod `
-  -Uri "http://127.0.0.1:8000/api/session/provider" `
-  -Method Post `
-  -ContentType "application/json; charset=utf-8" `
-  -Body $body |
-ConvertTo-Json -Depth 20
-```
-
-切换到 Terra 时，将：
-
-```powershell
-provider_mode = "qwen"
-```
-
-改为：
-
-```powershell
-provider_mode = "terra"
-```
-
-不建议在客户的一次真实会话中途切换 Provider。展会演示时应从欢迎页重新创建 Session。
+不建议在客户的实际会话中途切换 Provider。
 
 ---
 
-# 七、一键检查所有服务
+# 七、一键检查服务状态
 
 ## Backend
 
@@ -560,7 +661,7 @@ provider_mode = "terra"
 Invoke-RestMethod `
   -Uri "http://127.0.0.1:8000/api/health" `
   -Method Get |
-ConvertTo-Json -Depth 20
+ConvertTo-Json -Depth 30
 ```
 
 ## LLM
@@ -569,7 +670,7 @@ ConvertTo-Json -Depth 20
 Invoke-RestMethod `
   -Uri "http://127.0.0.1:8000/api/llm/status" `
   -Method Get |
-ConvertTo-Json -Depth 20
+ConvertTo-Json -Depth 30
 ```
 
 ## Vision
@@ -578,7 +679,7 @@ ConvertTo-Json -Depth 20
 Invoke-RestMethod `
   -Uri "http://127.0.0.1:8000/api/vision/status" `
   -Method Get |
-ConvertTo-Json -Depth 20
+ConvertTo-Json -Depth 30
 ```
 
 ## Face identity
@@ -590,7 +691,7 @@ Invoke-RestMethod `
 ConvertTo-Json -Depth 30
 ```
 
-期望看到：
+期望：
 
 ```text
 model.available = true
@@ -599,172 +700,65 @@ stores_raw_photos = false
 requires_confirmation = true
 ```
 
-## Kokoro TTS
+## Kokoro
+
+```powershell
+Invoke-RestMethod `
+  -Uri "http://127.0.0.1:8010/health" `
+  -Method Get |
+ConvertTo-Json -Depth 30
+```
+
+## Backend TTS 代理
 
 ```powershell
 Invoke-RestMethod `
   -Uri "http://127.0.0.1:8000/api/tts/status" `
   -Method Get |
-ConvertTo-Json -Depth 20
+ConvertTo-Json -Depth 30
 ```
 
-## Ollama，仅 Qwen 模式
+## Ollama，仅 Qwen
 
 ```powershell
 Invoke-RestMethod `
   -Uri "http://127.0.0.1:11434/api/tags" `
   -Method Get |
-ConvertTo-Json -Depth 20
+ConvertTo-Json -Depth 30
 ```
 
 ---
 
-# 八、OpenAI TTS fallback
+# 八、Smoke tests
 
-Kokoro 是首选 TTS。OpenAI TTS 只是可选 fallback。
-
-如果 Backend Terminal 中已经设置：
-
-```powershell
-$env:OPENAI_API_KEY
-```
-
-可以继续配置：
-
-```powershell
-$env:OPENAI_TTS_MODEL="gpt-4o-mini-tts"
-$env:OPENAI_TTS_VOICE="marin"
-```
-
-TTS `auto` 顺序为：
-
-```text
-Kokoro 本地 TTS
-→ OpenAI TTS
-→ 浏览器 SpeechSynthesis
-```
-
-不要提交真实 API Key。`.env` 文件已被 Git 忽略，但仍建议在 PowerShell Session 中临时设置。
-
----
-
-# 九、本地人脸识别与客户记忆
-
-MVP 使用：
-
-```text
-OpenCV YuNet：人脸检测和五点关键点
-OpenCV SFace：人脸对齐与特征向量
-SQLite：客户、模板、Session 和历史记录
-```
-
-数据库位置：
-
-```text
-backend/app/data/customer_memory.db
-```
-
-数据库及 WAL 文件不会提交到 Git。
-
-## 人脸注册与回访测试流程
-
-1. 启动摄像头、Kokoro、所选 LLM、Backend 和 Frontend。
-2. 第一次访问时点击 **开始咨询**。
-3. 完成咨询并点击 **结束并总结**。
-4. 点击 **同意并保存本地记忆**。
-5. 阅读隐私说明，勾选同意，正对摄像头完成采集。
-6. 返回欢迎页，再次点击开始咨询。
-7. 系统匹配成功后显示通用 **欢迎回来** 页面。
-8. 选择：
-   - **继续上次咨询**：恢复上次项目；
-   - **开始新的选购项目**：只保留稳定家庭背景；
-   - **这不是我**：按匿名新客户处理。
-
-## 可选阈值
-
-```powershell
-$env:FACE_ACCEPT_THRESHOLD="0.45"
-$env:FACE_DUPLICATE_THRESHOLD="0.50"
-$env:FACE_MARGIN_THRESHOLD="0.04"
-$env:FACE_RECOGNITION_SAMPLES="8"
-$env:FACE_MIN_VOTES="3"
-$env:FACE_ENROLLMENT_SAMPLES="10"
-$env:FACE_CANDIDATE_TTL_SECONDS="180"
-```
-
-默认策略偏向：
-
-```text
-宁可偶尔认不出回访客户
-也不要错误加载其他客户的历史数据
-```
-
-## 隐私行为
-
-- 必须由客户明确勾选并点击注册；
-- 默认不保存原始人脸照片；
-- 只保存本地 SFace float32 特征向量；
-- 人脸匹配结果只生成临时候选；
-- 未经客户确认不会恢复历史；
-- 确认前不显示姓名和历史内容；
-- 每次到店创建新的 `session_id`；
-- `customer_id` 和 `session_id` 分离；
-- 本功能只用于低风险导购连续性，不用于付款、门禁或法律身份验证。
-
----
-
-# 十、用户删除本地数据
-
-主页面右下角点击：
-
-```text
-隐私与数据
-```
-
-或直接打开：
-
-```text
-http://127.0.0.1:5173/delete-my-data.html
-```
-
-删除流程：
-
-```text
-当前用户重新进行本地人脸验证
-→ 找到可信候选记录
-→ 用户第二次明确确认
-→ 永久删除人脸特征、客户档案和全部历史咨询
-```
-
-删除后，如果数据库原来只有一个客户，则：
-
-```powershell
-Invoke-RestMethod `
-  -Uri "http://127.0.0.1:8000/api/identity/status" `
-  -Method Get |
-ConvertTo-Json -Depth 20
-```
-
-应看到：
-
-```text
-customer_count = 0
-face_template_count = 0
-```
-
-之后可以重新演示完整的人脸注册流程。
-
----
-
-# 十一、Smoke tests
-
-## 平行 LLM Backend
-
-Qwen：
+## 高级销售 Phase 1
 
 ```powershell
 cd F:\emergency-wood-floor-greeter-demo\backend
 
+powershell -ExecutionPolicy Bypass `
+  -File .\scripts\smoke_test_senior_sales.ps1
+```
+
+## 销售 Phase 2/3 与 CRM
+
+```powershell
+powershell -ExecutionPolicy Bypass `
+  -File .\scripts\smoke_test_sales_phase2_3.ps1
+```
+
+## 双语 UI 与语音
+
+```powershell
+powershell -ExecutionPolicy Bypass `
+  -File .\scripts\smoke_test_bilingual.ps1
+```
+
+## 平行 LLM
+
+Qwen：
+
+```powershell
 powershell -ExecutionPolicy Bypass `
   -File .\scripts\smoke_test_parallel_llm.ps1 `
   -ProviderMode qwen
@@ -780,24 +774,6 @@ powershell -ExecutionPolicy Bypass `
 
 ## 人脸身份 MVP
 
-Qwen：
-
-```powershell
-powershell -ExecutionPolicy Bypass `
-  -File .\scripts\smoke_test_face_identity.ps1 `
-  -ProviderMode qwen
-```
-
-Terra：
-
-```powershell
-powershell -ExecutionPolicy Bypass `
-  -File .\scripts\smoke_test_face_identity.ps1 `
-  -ProviderMode terra
-```
-
-包含现场人脸识别：
-
 ```powershell
 powershell -ExecutionPolicy Bypass `
   -File .\scripts\smoke_test_face_identity.ps1 `
@@ -805,40 +781,84 @@ powershell -ExecutionPolicy Bypass `
   -RunRecognition
 ```
 
-没有已注册客户时返回：
+没有已注册客户时：
 
 ```text
 status = no_enrolled_customers
 ```
 
-属于正常结果，不代表测试失败。
+属于正常结果。
 
 ---
 
-# 十二、常见问题
+# 九、本地数据、CRM 与隐私
 
-## 1. 切换 Provider 后前端仍使用旧模式
-
-原因通常是：
-
-- Backend 没有重启；
-- 浏览器仍保留旧 Session；
-- 环境变量设置在另一个 PowerShell 中；
-- 使用了旧页面热更新状态。
-
-处理：
+本地数据库：
 
 ```text
-1. Ctrl+C 停止 Backend
-2. 在同一个 Terminal 设置 DEFAULT_DIALOGUE_PROVIDER
-3. 重新启动 uvicorn
-4. 前端点击“重新开始”
-5. Ctrl+F5 强制刷新
+backend/app/data/customer_memory.db
 ```
 
-## 2. Qwen 模式显示 Ollama request failed
+保存：
 
-检查：
+- 客户结构化需求；
+- 本地 SFace 特征向量；
+- 会话摘要；
+- 联系授权；
+- CRM 跟进状态和提醒。
+
+默认行为：
+
+- 不保存原始人脸照片；
+- 未经确认不恢复历史；
+- 确认前不显示姓名和历史；
+- 联系方式不会发送给 LLM；
+- `customer_id` 与 `session_id` 分离；
+- 每次到店创建新的 Session；
+- 功能仅用于低风险导购连续性，不用于付款、门禁或法律身份验证。
+
+用户数据删除页面：
+
+```text
+http://127.0.0.1:5173/delete-my-data.html
+```
+
+本地 CRM 工作台：
+
+```text
+http://127.0.0.1:5173/crm-workbench.html
+```
+
+CRM 工作台当前没有生产级身份认证，只能用于本机 Demo，不得暴露到公网。
+
+---
+
+# 十、常见问题
+
+## 1. Terra 显示“云端智能服务暂时不可用”
+
+先看 Backend 日志。
+
+若日志为：
+
+```text
+OPENAI_API_KEY is not configured for Terra mode
+```
+
+执行：
+
+```powershell
+Ctrl+C
+
+cd F:\emergency-wood-floor-greeter-demo\backend
+
+powershell -ExecutionPolicy Bypass `
+  -File .\scripts\start_backend_terra.ps1
+```
+
+不要只读取 `$secureKey` 而不设置 `$env:OPENAI_API_KEY`。
+
+## 2. Qwen 显示 `Ollama request failed`
 
 ```powershell
 Invoke-RestMethod `
@@ -849,45 +869,51 @@ ollama list
 ollama ps
 ```
 
-确认模型名称完全一致：
+确认模型名：
 
 ```text
 qwen3.5:4b
 ```
 
-## 3. Terra 模式显示 OPENAI_API_KEY is not configured
+## 3. Kokoro 仍有旧语速或旧停顿
 
-Key 必须在启动 Backend 的同一个 PowerShell 中设置。
-
-```powershell
-if ($env:OPENAI_API_KEY) {
-    Write-Host "OPENAI_API_KEY is set"
-} else {
-    Write-Host "OPENAI_API_KEY is missing"
-}
-```
-
-设置后必须重启 Backend。
-
-## 4. Kokoro 不可用
+检查：
 
 ```powershell
 Invoke-RestMethod `
   -Uri "http://127.0.0.1:8010/health" `
-  -Method Get
+  -Method Get |
+ConvertTo-Json -Depth 30
 ```
 
-确认 Kokoro 使用独立环境：
+应看到：
+
+```text
+version = 0.5.1
+clause_pause_ms = 0
+sentence_pause_ms = 0
+```
+
+如果不是，端口 8010 仍运行旧进程：
 
 ```powershell
-conda activate kokoro-tts
+Get-NetTCPConnection -LocalPort 8010 -State Listen |
+Select-Object LocalAddress, LocalPort, OwningProcess
 ```
 
-不要把 Kokoro 安装进视觉 Backend 环境。
+确认后停止旧进程，再启动新版 Kokoro。
+
+## 4. 切换 Provider 后仍使用旧模式
+
+```text
+1. Ctrl+C 停止 Backend
+2. 按目标模式重新启动 Backend
+3. 检查 /api/llm/status
+4. 前端点击“重新开始”
+5. Ctrl+F5 强制刷新
+```
 
 ## 5. 人脸模型不可用
-
-重新下载：
 
 ```powershell
 cd F:\emergency-wood-floor-greeter-demo\backend
@@ -900,21 +926,27 @@ powershell -ExecutionPolicy Bypass -File .\scripts\download_face_models.ps1
 
 - 使用 Chrome 或 Edge；
 - 检查麦克风权限；
-- 点击 **点击说话**；
+- 点击“点击说话”；
 - 说完完整句子；
-- 再点击 **停止说话**；
-- 更新前端后执行 `Ctrl+F5`。
+- 点击“停止说话”；
+- 更新前端后使用 `Ctrl+F5`。
 
 ---
 
-# 十三、主要地址
+# 十一、主要地址
 
 ```text
 Frontend:
 http://127.0.0.1:5173/
 
+联系方式授权:
+http://127.0.0.1:5173/follow-up.html
+
 用户数据删除:
 http://127.0.0.1:5173/delete-my-data.html
+
+CRM 工作台:
+http://127.0.0.1:5173/crm-workbench.html
 
 Backend API:
 http://127.0.0.1:8000/
@@ -948,3 +980,5 @@ http://127.0.0.1:8010
 
 - Local Kokoro setup: `local_tts/README.md`
 - OpenAI TTS setup: `backend/OPENAI_TTS_SETUP.md`
+- Senior sales Phase 1: `backend/SENIOR_SALES_PHASE1.md`
+- Sales Phase 2/3: `backend/SALES_PHASE2_3.md`
