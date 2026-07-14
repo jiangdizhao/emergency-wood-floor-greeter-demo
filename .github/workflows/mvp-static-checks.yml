@@ -13,8 +13,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Compile backend Python sources
-        run: python -m compileall -q backend/app
+      - name: Compile backend and local TTS Python sources
+        run: python -m compileall -q backend/app backend/scripts local_tts
 
   frontend-build:
     runs-on: ubuntu-latest
