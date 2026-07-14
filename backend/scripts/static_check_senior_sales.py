@@ -14,7 +14,8 @@ if sys.version_info < (3, 10):
     raise SystemExit(2)
 
 from app.llm.prompts import QWEN_RENDER_SYSTEM_PROMPT, RENDER_SYSTEM_PROMPT
-from app.llm.schemas import DialogueDecision, SalesDecision, SemanticTurn, ValidationResult
+from app.llm.providers import _finalize_sales_answer
+from app.llm.schemas import DialogueDecision, SemanticTurn, ValidationResult
 from app.models import CustomerProfile
 from app.services.answer_plan_service import AnswerPlanService
 from app.services.dialogue_context_service import DialogueContext
@@ -67,8 +68,6 @@ def main() -> None:
     assert "直接从产品讲起" in greeting
     assert "。。" not in greeting
 
-    # One clear purchase driver must be enough to start showing product value.
-    # Room, budget, style, area, timeline and colour are not mandatory gates.
     early_profile = CustomerProfile(
         session_id="sales-value-first-check",
         priorities={"耐磨": "high"},
@@ -116,31 +115,44 @@ def main() -> None:
     assert plan.featured_collections
     assert plan.sales_stage == "recommendation"
 
-    # The rendering policy must explicitly make next_question optional and forbid
-    # normal recommendation turns from ending as another forced question.
     assert "next_question 是可选资料" in RENDER_SYSTEM_PROMPT
     assert "普通推荐和普通需求更新不要以问号结束" in RENDER_SYSTEM_PROMPT
     assert "每轮优先介绍一个新的产品特点" in QWEN_RENDER_SYSTEM_PROMPT
     assert "普通回答不要提问" in QWEN_RENDER_SYSTEM_PROMPT
 
-    # Once products exist, missing area/timeline must not force another interview.
+    # Even when a renderer ignores the prompt and appends the old AnswerPlan
+    # question, the provider guard removes that final question and replaces it
+    # with a statement-led invitation.
+    rendered_with_question = (
+        f"我建议先看{plan.products[0].name}，它更符合耐磨优先。"
+        "为了判断活动条件，请问预计铺装面积大约多少平方米？"
+    )
+    guarded = _finalize_sales_answer(rendered_with_question, plan, "zh")
+    assert not guarded.endswith(("?", "？"))
+    assert "预计铺装面积" not in guarded
+    assert "不会重新开始一轮问卷" in guarded
+
     continued_profile = early_profile.model_copy(
         update={
             "recommended_product_ids": [product.id for product in products[:2]],
             "room_type": "客厅",
         }
     )
+    continued_decision = dialogue_policy.decide(
+        validation=validation,
+        profile=continued_profile,
+        context=context.model_copy(update={"turn_index": 3}),
+    )
+    assert continued_decision.action == "recommend_now"
+
     continued_sales_decision = sales_policy.decide(
         validation=validation,
         profile=continued_profile,
         context=context.model_copy(update={"turn_index": 3}),
-        dialogue_decision=DialogueDecision(
-            action="recommend_now",
-            reason="refresh value story",
-        ),
+        dialogue_decision=continued_decision,
     )
     assert continued_sales_decision.stage == "recommendation"
-    assert "不要自动询问面积" in continued_sales_decision.objective
+    assert "不要逐项盘问" in continued_sales_decision.objective
 
     print("Senior sales value-first static check passed.")
     print(f"Company: {company.get('company_name')}")
@@ -150,7 +162,7 @@ def main() -> None:
         print(f"Backup option: {plan.products[1].name}")
     print("Featured collections: " + ", ".join(item.name for item in plan.featured_collections))
     print("Serial room/budget/style/area/timeline questionnaire: disabled")
-    print("Normal recommendation questions: optional and suppressed by render policy")
+    print("Forced trailing recommendation questions: removed by provider guard")
 
 
 if __name__ == "__main__":
