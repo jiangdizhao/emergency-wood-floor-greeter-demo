@@ -2,8 +2,7 @@
   const previousFetch = window.fetch.bind(window)
   const IDLE_DELAYS_MS = [8000, 10000, 10000, 14000]
   const QUESTION_RESPONSE_DELAY_MS = 45000
-  const QUESTION_BUSY_RETRY_MS = 1800
-  const QUESTION_BUSY_MAX_WAIT_MS = 10000
+  const BUSY_RETRY_MS = 500
   const MAX_PROACTIVE_STEPS = IDLE_DELAYS_MS.length
   const enabledKey = 'woodfloor_proactive_sales_enabled'
   const sessionKey = 'woodfloor_active_session_id'
@@ -13,6 +12,7 @@
   let timer = null
   let generation = 0
   let currentAudio = null
+  let proactiveInFlight = false
   let latestProducts = []
   let latestRecommended = []
   let latestProfile = null
@@ -20,7 +20,6 @@
   let latestVoice = 'zm_yunxi'
   let latestTtsUrl = 'http://127.0.0.1:8000/api/tts'
   let waitingForCustomerAnswer = false
-  let questionBusyDeadline = 0
   let observer = null
 
   const promotionEnglish = {
@@ -131,49 +130,53 @@
     return Boolean(document.querySelector('.consultation-screen'))
   }
 
-  function isInteractionBusy() {
+  function isMainAgentBusy() {
     if (!isConversationVisible()) return true
     if (document.querySelector('.thinking-bubble')) return true
     if (document.querySelector('.status-pulse.listening, .status-pulse.processing, .status-pulse.speaking')) return true
     if (document.querySelector('.modal-backdrop')) return true
     const textarea = document.querySelector('.conversation-card textarea')
-    if (textarea && textarea.value.trim()) return true
-    return Boolean(currentAudio)
+    return Boolean(textarea && textarea.value.trim())
   }
 
+  function isInteractionBusy() {
+    return proactiveInFlight || Boolean(currentAudio) || isMainAgentBusy()
+  }
+
+  function cadenceDelay() {
+    if (waitingForCustomerAnswer) return QUESTION_RESPONSE_DELAY_MS
+    return IDLE_DELAYS_MS[Math.min(step, IDLE_DELAYS_MS.length - 1)]
+  }
+
+  // The delay is counted only while the conversation is continuously idle. If the
+  // normal agent starts processing, listening or speaking, the countdown is discarded
+  // and restarted after that activity has fully ended. Proactive narration is never
+  // allowed to force its way through an active agent turn.
   function schedule(delayOverride) {
     clearTimer()
     if (!enabled || step >= MAX_PROACTIVE_STEPS || !isConversationVisible()) return
 
+    const delay = delayOverride ?? cadenceDelay()
     const token = ++generation
-    const questionWaitAtSchedule = delayOverride == null && waitingForCustomerAnswer
-    const delay = delayOverride ?? (
-      questionWaitAtSchedule
-        ? QUESTION_RESPONSE_DELAY_MS
-        : IDLE_DELAYS_MS[Math.min(step, IDLE_DELAYS_MS.length - 1)]
-    )
+
+    if (isInteractionBusy()) {
+      timer = window.setTimeout(() => {
+        timer = null
+        if (token !== generation || !enabled || !isConversationVisible()) return
+        schedule(delay)
+      }, BUSY_RETRY_MS)
+      return
+    }
 
     timer = window.setTimeout(() => {
       timer = null
       if (token !== generation || !enabled || !isConversationVisible()) return
-
-      if (questionWaitAtSchedule) {
-        waitingForCustomerAnswer = false
-        questionBusyDeadline = Date.now() + QUESTION_BUSY_MAX_WAIT_MS
-      }
-
       if (isInteractionBusy()) {
-        if (questionBusyDeadline > 0 && Date.now() >= questionBusyDeadline) {
-          questionBusyDeadline = 0
-          void deliverStep()
-          return
-        }
-        schedule(questionWaitAtSchedule || questionBusyDeadline > 0 ? QUESTION_BUSY_RETRY_MS : 1800)
+        schedule(delay)
         return
       }
-
-      questionBusyDeadline = 0
-      void deliverStep()
+      waitingForCustomerAnswer = false
+      void deliverStep(token)
     }, delay)
   }
 
@@ -181,7 +184,6 @@
     generation += 1
     clearTimer()
     waitingForCustomerAnswer = false
-    questionBusyDeadline = 0
     if (stopSpeech) stopAudio()
   }
 
@@ -190,7 +192,6 @@
     clearTimer()
     step = 0
     waitingForCustomerAnswer = Boolean(awaitCustomerAnswer)
-    questionBusyDeadline = 0
     if (stopSpeech) stopAudio()
     if (enabled && isConversationVisible()) schedule()
   }
@@ -355,7 +356,7 @@
     contact.hidden = !offerContact
   }
 
-  async function speak(text) {
+  async function speak(text, token) {
     stopAudio()
     const lang = language()
     const voice = lang === 'en'
@@ -374,6 +375,7 @@
       })
       if (!response.ok) throw new Error(`TTS ${response.status}`)
       const blob = await response.blob()
+      if (token !== generation || !enabled || !isConversationVisible() || isMainAgentBusy()) return
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
       currentAudio = audio
@@ -390,7 +392,11 @@
     }
   }
 
-  async function deliverStep() {
+  async function deliverStep(token) {
+    if (token !== generation || isInteractionBusy()) {
+      schedule()
+      return
+    }
     const currentStep = step
     const message = messageForStep(currentStep)
     if (!message?.text) {
@@ -398,10 +404,16 @@
       schedule()
       return
     }
+
+    proactiveInFlight = true
     showMessage(message.text, message.offerContact)
     step += 1
-    await speak(message.text)
-    if (enabled && step < MAX_PROACTIVE_STEPS) schedule()
+    try {
+      await speak(message.text, token)
+    } finally {
+      proactiveInFlight = false
+    }
+    if (token === generation && enabled && step < MAX_PROACTIVE_STEPS) schedule()
   }
 
   function capturePayload(url, payload) {
@@ -456,8 +468,7 @@
 
   function installActivityListeners() {
     const resetFromUser = (event) => {
-      if (!event.isTrusted) return
-      if (!isConversationVisible()) return
+      if (!event.isTrusted || !isConversationVisible()) return
       const target = event.target
       if (target instanceof Element && target.closest('#proactive-sales-dock')) return
       resetCadence()
@@ -465,6 +476,9 @@
     document.addEventListener('pointerdown', resetFromUser, true)
     document.addEventListener('keydown', resetFromUser, true)
     document.addEventListener('input', resetFromUser, true)
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && isConversationVisible()) resetCadence({ stopSpeech: false })
+    })
   }
 
   function observeScreens() {
@@ -476,9 +490,16 @@
         return
       }
       updateDockLabels()
-      if (enabled && timer === null && currentAudio === null && step < MAX_PROACTIVE_STEPS) schedule()
+      if (enabled && timer === null && !proactiveInFlight && currentAudio === null && step < MAX_PROACTIVE_STEPS) {
+        schedule()
+      }
     })
-    observer.observe(document.getElementById('root') || document.body, { childList: true, subtree: true })
+    observer.observe(document.getElementById('root') || document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class'],
+    })
   }
 
   async function loadPromotionCatalog() {
