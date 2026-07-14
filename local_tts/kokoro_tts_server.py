@@ -44,34 +44,66 @@ runtime = KokoroRuntime(lock=threading.RLock(), inference_lock=threading.Lock())
 DEFAULT_EN_VOICE = os.getenv("KOKORO_EN_VOICE", "am_liam")
 DEFAULT_ZH_VOICE = os.getenv("KOKORO_ZH_VOICE", "zm_yunxi")
 SAMPLE_RATE = int(os.getenv("KOKORO_SAMPLE_RATE", "24000"))
-DEFAULT_ZH_SPEED = float(os.getenv("KOKORO_ZH_SPEED", "0.84"))
+DEFAULT_ZH_SPEED = float(os.getenv("KOKORO_ZH_SPEED", "0.86"))
 DEFAULT_EN_SPEED = float(os.getenv("KOKORO_EN_SPEED", "0.92"))
 LEGACY_SPEED_ONE_USES_DEFAULT = os.getenv(
     "KOKORO_LEGACY_SPEED_ONE_USES_DEFAULT",
     "true",
 ).strip().lower() not in {"0", "false", "no", "off"}
 
-# Keep chunks below Kokoro's long-phoneme truncation boundary, but avoid the
-# previous 48-character fragmentation that sounded like separate recordings.
-ZH_MAX_CHARS = max(24, int(os.getenv("KOKORO_ZH_MAX_CHARS", "88")))
+# Different Kokoro voices have noticeably different perceived pacing. These
+# defaults keep the warm voices relaxed while preventing the energetic voice from
+# sounding dragged out. Override with KOKORO_ZH_VOICE_SPEEDS when needed.
+BUILTIN_ZH_VOICE_SPEEDS = {
+    "zm_yunxi": 0.86,
+    "zm_yunjian": 0.84,
+    "zm_yunxia": 0.90,
+    "zm_yunyang": 0.87,
+}
+
+
+def _parse_voice_speeds(raw: str) -> dict[str, float]:
+    output = dict(BUILTIN_ZH_VOICE_SPEEDS)
+    for item in raw.split(","):
+        item = item.strip()
+        if not item or "=" not in item:
+            continue
+        voice, value = item.split("=", 1)
+        try:
+            speed = float(value.strip())
+        except ValueError:
+            continue
+        if 0.65 <= speed <= 1.25:
+            output[voice.strip()] = speed
+    return output
+
+
+ZH_VOICE_SPEEDS = _parse_voice_speeds(os.getenv("KOKORO_ZH_VOICE_SPEEDS", ""))
+
+# Keep chunks below Kokoro's long-phoneme truncation boundary. Around 78 Chinese
+# characters gives the model enough context for natural phrasing without returning
+# to the fragmented 48-character behaviour.
+ZH_MAX_CHARS = max(24, int(os.getenv("KOKORO_ZH_MAX_CHARS", "78")))
 EN_MAX_CHARS = max(120, int(os.getenv("KOKORO_EN_MAX_CHARS", "260")))
 
-# Synthetic pauses remain disabled. Mandarin punctuation can still make Kokoro
-# produce exaggerated pauses, so the audio-only synthesis text may neutralize
-# punctuation while the visible UI text remains unchanged.
+# No synthetic punctuation silence is added. Instead, Mandarin uses a soft prosody
+# transform: hard sentence boundaries inside a chunk become commas, while the final
+# sentence keeps an ending mark. This preserves intonation without long stop-start gaps.
 CLAUSE_PAUSE_MS = max(0, int(os.getenv("KOKORO_CLAUSE_PAUSE_MS", "0")))
 SENTENCE_PAUSE_MS = max(0, int(os.getenv("KOKORO_SENTENCE_PAUSE_MS", "0")))
-ZH_NEUTRALIZE_PUNCTUATION = os.getenv(
-    "KOKORO_ZH_NEUTRALIZE_PUNCTUATION",
-    "true",
-).strip().lower() not in {"0", "false", "no", "off"}
+ZH_PROSODY_MODE = os.getenv("KOKORO_ZH_PROSODY_MODE", "soft").strip().lower()
+if ZH_PROSODY_MODE not in {"original", "soft", "neutral"}:
+    ZH_PROSODY_MODE = "soft"
+
 TRIM_CHUNK_SILENCE = os.getenv(
     "KOKORO_TRIM_CHUNK_SILENCE",
     "true",
 ).strip().lower() not in {"0", "false", "no", "off"}
-SILENCE_THRESHOLD_DB = float(os.getenv("KOKORO_SILENCE_THRESHOLD_DB", "-42"))
-SILENCE_PAD_MS = max(0, int(os.getenv("KOKORO_SILENCE_PAD_MS", "8")))
-CHUNK_CROSSFADE_MS = max(0, int(os.getenv("KOKORO_CHUNK_CROSSFADE_MS", "8")))
+# Less aggressive than the previous -42 dB / 8 ms setting. It preserves breath and
+# consonant tails while still removing the large leading/trailing gaps of each chunk.
+SILENCE_THRESHOLD_DB = float(os.getenv("KOKORO_SILENCE_THRESHOLD_DB", "-46"))
+SILENCE_PAD_MS = max(0, int(os.getenv("KOKORO_SILENCE_PAD_MS", "20")))
+CHUNK_CROSSFADE_MS = max(0, int(os.getenv("KOKORO_CHUNK_CROSSFADE_MS", "4")))
 
 WARMUP_ON_START = os.getenv("KOKORO_WARMUP_ON_START", "true").strip().lower() not in {
     "0",
@@ -119,15 +151,17 @@ WARMUP_EN_VOICES = tuple(
 )
 
 
-def _default_speed(language: Language) -> float:
+def _default_speed(language: Language, voice: str | None = None) -> float:
+    if language == "zh" and voice:
+        return ZH_VOICE_SPEEDS.get(voice, DEFAULT_ZH_SPEED)
     return DEFAULT_ZH_SPEED if language == "zh" else DEFAULT_EN_SPEED
 
 
-def _resolve_speed(language: Language, requested_speed: float | None) -> float:
+def _resolve_speed(language: Language, voice: str, requested_speed: float | None) -> float:
     if requested_speed is None:
-        return _default_speed(language)
+        return _default_speed(language, voice)
     if LEGACY_SPEED_ONE_USES_DEFAULT and abs(requested_speed - 1.0) < 1e-9:
-        return _default_speed(language)
+        return _default_speed(language, voice)
     return requested_speed
 
 
@@ -143,8 +177,21 @@ def _find_safe_cut(text: str, limit: int, language: Language) -> int:
     return limit
 
 
+def _clean_visible_text_for_speech(text: str, language: Language) -> str:
+    cleaned = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Customer-facing answers may contain Markdown emphasis. It should never be read
+    # aloud as literal star characters.
+    cleaned = re.sub(r"[*_`#]+", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if language == "zh":
+        cleaned = cleaned.replace("㎡", " 平方米")
+        cleaned = re.sub(r"\bSPC\b", "S P C", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bAC\s*([0-9]+)\b", r"A C \1", cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
 def _split_text_for_kokoro(text: str, language: Language) -> list[str]:
-    normalized = re.sub(r"[ \t]+", " ", text.replace("\r\n", "\n").replace("\r", "\n")).strip()
+    normalized = _clean_visible_text_for_speech(text, language)
     if not normalized:
         return []
 
@@ -198,15 +245,44 @@ def _split_text_for_kokoro(text: str, language: Language) -> list[str]:
     return chunks
 
 
-def _synthesis_text(chunk: str, language: Language) -> str:
-    if language != "zh" or not ZH_NEUTRALIZE_PUNCTUATION:
-        return chunk
+def _soft_mandarin_prosody(chunk: str, *, is_last: bool) -> str:
+    original = chunk.strip()
+    if not original:
+        return original
 
-    # Preserve all words and numbers while removing punctuation tokens that can
-    # create long model-level pauses. Visible text is not modified.
-    neutralized = re.sub(r"[，。！？；：、,.!?;:]+", " ", chunk)
-    neutralized = re.sub(r"\s+", " ", neutralized).strip()
-    return neutralized or chunk
+    final_mark = ""
+    final_match = re.search(r"([。！？!?])\s*$", original)
+    if final_match:
+        final_mark = final_match.group(1)
+
+    # Keep list commas and ordinary commas as short prosody cues. Convert hard
+    # boundaries inside the generated chunk to a comma, avoiding repeated full-stop
+    # resets in one answer. Colons also become a soft cue because Kokoro can pause too
+    # heavily around Chinese explanatory colons.
+    softened = re.sub(r"[。！？!?；;]+", "，", original)
+    softened = re.sub(r"[：:]+", "，", softened)
+    softened = re.sub(r"[，,]+", "，", softened)
+    softened = re.sub(r"\s*，\s*", "，", softened)
+    softened = softened.strip("， ")
+
+    if is_last:
+        if final_mark in {"？", "?"}:
+            softened += "？"
+        elif final_mark in {"！", "!"}:
+            softened += "！"
+        else:
+            softened += "。"
+    return softened
+
+
+def _synthesis_text(chunk: str, language: Language, *, is_last: bool) -> str:
+    if language != "zh" or ZH_PROSODY_MODE == "original":
+        return chunk
+    if ZH_PROSODY_MODE == "neutral":
+        neutralized = re.sub(r"[，。！？；：、,.!?;:]+", " ", chunk)
+        neutralized = re.sub(r"\s+", " ", neutralized).strip()
+        return neutralized or chunk
+    return _soft_mandarin_prosody(chunk, is_last=is_last)
 
 
 def _pause_samples(graphemes: str) -> int:
@@ -237,9 +313,6 @@ def _trim_silence(array):
     start = max(0, int(active[0]) - pad)
     end = min(samples.size, int(active[-1]) + pad + 1)
     trimmed = samples[start:end]
-
-    # Never return an implausibly short fragment because of an aggressive
-    # threshold. A spoken chunk should normally exceed 80 milliseconds.
     if trimmed.size < int(SAMPLE_RATE * 0.08):
         return samples
     return trimmed
@@ -301,12 +374,15 @@ def _synthesize_wav(
         source_chunks = _split_text_for_kokoro(text, language)
         if not source_chunks:
             raise RuntimeError("Text produced no Kokoro chunks.")
-        synthesis_chunks = [_synthesis_text(chunk, language) for chunk in source_chunks]
+        synthesis_chunks = [
+            _synthesis_text(chunk, language, is_last=index == len(source_chunks) - 1)
+            for index, chunk in enumerate(source_chunks)
+        ]
 
         print(
             f"Kokoro synth language={language} voice={voice} speed={speed:.2f} "
             f"characters={len(text)} text_chunks={len(source_chunks)} "
-            f"punctuation_neutralized={language == 'zh' and ZH_NEUTRALIZE_PUNCTUATION}",
+            f"zh_prosody_mode={ZH_PROSODY_MODE}",
             flush=True,
         )
 
@@ -348,14 +424,11 @@ def _synthesize_wav(
 
 def _warmup_voice_group(*, language: Language, voices: tuple[str, ...], text: str) -> None:
     label = "English" if language == "en" else "Mandarin"
-    speed = _default_speed(language)
     text = text.strip()
-    print(
-        f"Warming up Kokoro {label} voices at speed {speed:.2f}: " + ", ".join(voices),
-        flush=True,
-    )
+    print(f"Warming up Kokoro {label} voices: " + ", ".join(voices), flush=True)
 
     for voice in voices:
+        speed = _default_speed(language, voice)
         started = time.perf_counter()
         cache_key = (language, voice, speed, text)
         error_key = f"{language}:{voice}"
@@ -366,8 +439,8 @@ def _warmup_voice_group(*, language: Language, voices: tuple[str, ...], text: st
                 runtime.warmup_cache[cache_key] = audio
                 runtime.warmup_errors.pop(error_key, None)
             print(
-                f"Kokoro {label} voice '{voice}' warm-up completed in {elapsed:.2f}s; "
-                f"welcome audio cached ({len(audio)} bytes).",
+                f"Kokoro {label} voice '{voice}' warm-up completed at speed {speed:.2f} "
+                f"in {elapsed:.2f}s; welcome audio cached ({len(audio)} bytes).",
                 flush=True,
             )
         except Exception as exc:  # pragma: no cover - runtime environment specific
@@ -416,7 +489,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="Local Kokoro TTS Server",
-    version="0.6.0",
+    version="0.7.0",
     description="Standalone bilingual local TTS server for the wood-floor greeter demo.",
     lifespan=lifespan,
 )
@@ -470,12 +543,14 @@ def health() -> dict:
             "default_zh_voice": DEFAULT_ZH_VOICE,
             "default_en_speed": DEFAULT_EN_SPEED,
             "default_zh_speed": DEFAULT_ZH_SPEED,
+            "zh_voice_speeds": dict(ZH_VOICE_SPEEDS),
             "legacy_speed_one_uses_default": LEGACY_SPEED_ONE_USES_DEFAULT,
             "zh_max_chars_per_chunk": ZH_MAX_CHARS,
             "en_max_chars_per_chunk": EN_MAX_CHARS,
             "clause_pause_ms": CLAUSE_PAUSE_MS,
             "sentence_pause_ms": SENTENCE_PAUSE_MS,
-            "zh_punctuation_neutralized": ZH_NEUTRALIZE_PUNCTUATION,
+            "zh_prosody_mode": ZH_PROSODY_MODE,
+            "zh_punctuation_neutralized": ZH_PROSODY_MODE == "neutral",
             "trim_chunk_silence": TRIM_CHUNK_SILENCE,
             "silence_threshold_db": SILENCE_THRESHOLD_DB,
             "silence_pad_ms": SILENCE_PAD_MS,
@@ -518,7 +593,10 @@ def _audio_response(
             "X-TTS-Language": language,
             "X-TTS-Speed": f"{speed:.2f}",
             "X-TTS-Text-Chunks": str(text_chunk_count),
-            "X-TTS-Punctuation-Neutralized": str(language == "zh" and ZH_NEUTRALIZE_PUNCTUATION).lower(),
+            "X-TTS-ZH-Prosody-Mode": ZH_PROSODY_MODE if language == "zh" else "n/a",
+            "X-TTS-Punctuation-Neutralized": str(
+                language == "zh" and ZH_PROSODY_MODE == "neutral"
+            ).lower(),
             "X-TTS-Silence-Trimmed": str(TRIM_CHUNK_SILENCE).lower(),
             "X-TTS-Cache": cache_status,
         },
@@ -533,7 +611,7 @@ def tts(request: LocalTTSRequest) -> Response:
 
     language = request.language
     voice = request.voice or (DEFAULT_ZH_VOICE if language == "zh" else DEFAULT_EN_VOICE)
-    speed = _resolve_speed(language, request.speed)
+    speed = _resolve_speed(language, voice, request.speed)
     text_chunk_count = len(_split_text_for_kokoro(text, language))
     cache_key = (language, voice, speed, text)
 
