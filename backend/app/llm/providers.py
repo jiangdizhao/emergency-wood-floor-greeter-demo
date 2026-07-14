@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -23,6 +24,46 @@ from .schemas import AnswerPlan, DialogueProviderName, SemanticTurn, SEMANTIC_TU
 
 class DialogueProviderError(RuntimeError):
     pass
+
+
+def _remove_trailing_question(text: str) -> str:
+    """Remove a final question sentence from a normal product-led response."""
+
+    cleaned = text.strip()
+    if not cleaned.endswith(("?", "？")):
+        return cleaned
+
+    # Remove only the final sentence, preserving the product explanation before it.
+    match = re.search(r"(?:^|(?<=[。！？.!?]))[^。！？.!?]*[?？]\s*$", cleaned)
+    if match:
+        cleaned = cleaned[: match.start()].strip()
+    return cleaned.rstrip("。.!！?？ ")
+
+
+def _finalize_sales_answer(text: str, answer_plan: AnswerPlan, language: str) -> str:
+    """Backend guard against renderers restarting the questionnaire.
+
+    Prompts guide the model, but a smaller local model can still append the
+    AnswerPlan's legacy next_question. Normal recommendation and comparison turns
+    must end with a low-pressure statement instead of another forced question.
+    """
+
+    cleaned = re.sub(r"\s+", " ", text or "").strip()
+    if answer_plan.response_type not in {"recommendation", "comparison"}:
+        return cleaned
+
+    statement = (
+        "You can first consider these two directions. Whenever you are ready, share any one detail such as the room, budget, colour, area or timing, and I will refine the options without restarting a questionnaire."
+        if language == "en"
+        else "您可以先感受这两个方向，想继续时再告诉我空间、预算、颜色、面积或时间中的任意一项，我会直接收窄方案，不会重新开始一轮问卷。"
+    )
+
+    without_question = _remove_trailing_question(cleaned)
+    if not without_question:
+        return statement
+    if without_question.endswith(("。", ".", "!", "！")):
+        return without_question + statement
+    return without_question + (" " if language == "en" else "。") + statement
 
 
 class DialogueLLMProvider(ABC):
@@ -151,7 +192,6 @@ class TerraDialogueProvider(DialogueLLMProvider):
         language = get_current_response_language()
         if answer_plan.direct_message and answer_plan.response_type in {
             "clarification",
-            "acknowledgement",
             "service_unavailable",
         }:
             return localize_direct_message(answer_plan.direct_message, language) or answer_plan.direct_message
@@ -169,7 +209,8 @@ class TerraDialogueProvider(DialogueLLMProvider):
             "max_output_tokens": 420 if language == "en" else 360,
             "store": False,
         }
-        return self._output_text(self._post(payload, self.render_timeout))
+        rendered = self._output_text(self._post(payload, self.render_timeout))
+        return _finalize_sales_answer(rendered, answer_plan, language)
 
     def health(self) -> dict[str, Any]:
         return {
@@ -252,7 +293,6 @@ class QwenDialogueProvider(DialogueLLMProvider):
         language = get_current_response_language()
         if answer_plan.direct_message and answer_plan.response_type in {
             "clarification",
-            "acknowledgement",
             "service_unavailable",
         }:
             return localize_direct_message(answer_plan.direct_message, language) or answer_plan.direct_message
@@ -279,7 +319,7 @@ class QwenDialogueProvider(DialogueLLMProvider):
         content = str(response.get("message", {}).get("content") or "").strip()
         if not content:
             raise DialogueProviderError("Qwen returned an empty customer answer")
-        return content
+        return _finalize_sales_answer(content, answer_plan, language)
 
     def health(self) -> dict[str, Any]:
         available = False
