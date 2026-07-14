@@ -33,7 +33,6 @@ def _remove_trailing_question(text: str) -> str:
     if not cleaned.endswith(("?", "？")):
         return cleaned
 
-    # Remove only the final sentence, preserving the product explanation before it.
     match = re.search(r"(?:^|(?<=[。！？.!?]))[^。！？.!?]*[?？]\s*$", cleaned)
     if match:
         cleaned = cleaned[: match.start()].strip()
@@ -41,21 +40,22 @@ def _remove_trailing_question(text: str) -> str:
 
 
 def _finalize_sales_answer(text: str, answer_plan: AnswerPlan, language: str) -> str:
-    """Backend guard against renderers restarting the questionnaire.
-
-    Prompts guide the model, but a smaller local model can still append the
-    AnswerPlan's legacy next_question. Normal recommendation and comparison turns
-    must end with a low-pressure statement instead of another forced question.
-    """
+    """Guard normal product turns against restarting a questionnaire."""
 
     cleaned = re.sub(r"\s+", " ", text or "").strip()
     if answer_plan.response_type not in {"recommendation", "comparison"}:
         return cleaned
 
+    # A good product-led answer that already ends as a statement is preserved
+    # exactly. The standard invitation is only inserted when a renderer actually
+    # appends a forbidden trailing question.
+    if not cleaned.endswith(("?", "？")):
+        return cleaned
+
     statement = (
-        "You can first consider these two directions. Whenever you are ready, share any one detail such as the room, budget, colour, area or timing, and I will refine the options without restarting a questionnaire."
+        "You can first consider these directions. Whenever you are ready, share any one detail that matters to you and I will refine the options without restarting a questionnaire."
         if language == "en"
-        else "您可以先感受这两个方向，想继续时再告诉我空间、预算、颜色、面积或时间中的任意一项，我会直接收窄方案，不会重新开始一轮问卷。"
+        else "您可以先感受这两个方向，想继续时再告诉我任意一个您在意的细节，我会直接收窄方案，不会重新开始一轮问卷。"
     )
 
     without_question = _remove_trailing_question(cleaned)
