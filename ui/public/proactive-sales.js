@@ -2,6 +2,8 @@
   const previousFetch = window.fetch.bind(window)
   const IDLE_DELAYS_MS = [8000, 10000, 10000, 14000]
   const QUESTION_RESPONSE_DELAY_MS = 45000
+  const QUESTION_BUSY_RETRY_MS = 1800
+  const QUESTION_BUSY_MAX_WAIT_MS = 10000
   const MAX_PROACTIVE_STEPS = IDLE_DELAYS_MS.length
   const enabledKey = 'woodfloor_proactive_sales_enabled'
   const sessionKey = 'woodfloor_active_session_id'
@@ -17,8 +19,8 @@
   let latestPromotions = []
   let latestVoice = 'zm_yunxi'
   let latestTtsUrl = 'http://127.0.0.1:8000/api/tts'
-  let latestLanguage = language()
   let waitingForCustomerAnswer = false
+  let questionBusyDeadline = 0
   let observer = null
 
   const promotionEnglish = {
@@ -107,8 +109,8 @@
     if (payload.needs_clarification === true) return true
     if (typeof payload.pending_slot === 'string' && payload.pending_slot.trim()) return true
     if (typeof payload.last_assistant_question === 'string' && payload.last_assistant_question.trim()) return true
-    const answer = typeof payload.answer === 'string' ? payload.answer.trim() : ''
-    return /[?？]\s*$/.test(answer)
+    const visibleTexts = [payload.answer, payload.greeting]
+    return visibleTexts.some((value) => typeof value === 'string' && /[?？]\s*$/.test(value.trim()))
   }
 
   function stopAudio() {
@@ -142,22 +144,45 @@
   function schedule(delayOverride) {
     clearTimer()
     if (!enabled || step >= MAX_PROACTIVE_STEPS || !isConversationVisible()) return
+
     const token = ++generation
+    const questionWaitAtSchedule = delayOverride == null && waitingForCustomerAnswer
     const delay = delayOverride ?? (
-      waitingForCustomerAnswer
+      questionWaitAtSchedule
         ? QUESTION_RESPONSE_DELAY_MS
         : IDLE_DELAYS_MS[Math.min(step, IDLE_DELAYS_MS.length - 1)]
     )
+
     timer = window.setTimeout(() => {
       timer = null
       if (token !== generation || !enabled || !isConversationVisible()) return
+
+      if (questionWaitAtSchedule) {
+        waitingForCustomerAnswer = false
+        questionBusyDeadline = Date.now() + QUESTION_BUSY_MAX_WAIT_MS
+      }
+
       if (isInteractionBusy()) {
-        schedule(waitingForCustomerAnswer ? QUESTION_RESPONSE_DELAY_MS : 1800)
+        if (questionBusyDeadline > 0 && Date.now() >= questionBusyDeadline) {
+          questionBusyDeadline = 0
+          void deliverStep()
+          return
+        }
+        schedule(questionWaitAtSchedule || questionBusyDeadline > 0 ? QUESTION_BUSY_RETRY_MS : 1800)
         return
       }
-      waitingForCustomerAnswer = false
+
+      questionBusyDeadline = 0
       void deliverStep()
     }, delay)
+  }
+
+  function suspendCadence({ stopSpeech = true } = {}) {
+    generation += 1
+    clearTimer()
+    waitingForCustomerAnswer = false
+    questionBusyDeadline = 0
+    if (stopSpeech) stopAudio()
   }
 
   function resetCadence({ stopSpeech = true, awaitCustomerAnswer = waitingForCustomerAnswer } = {}) {
@@ -165,6 +190,7 @@
     clearTimer()
     step = 0
     waitingForCustomerAnswer = Boolean(awaitCustomerAnswer)
+    questionBusyDeadline = 0
     if (stopSpeech) stopAudio()
     if (enabled && isConversationVisible()) schedule()
   }
@@ -296,11 +322,7 @@
       localStorage.setItem(enabledKey, enabled ? '1' : '0')
       updateDockLabels()
       if (enabled) resetCadence({ stopSpeech: false })
-      else {
-        generation += 1
-        clearTimer()
-        stopAudio()
-      }
+      else suspendCadence()
     })
     return dock
   }
@@ -308,7 +330,6 @@
   function updateDockLabels() {
     const dock = ensureDock()
     const lang = language()
-    latestLanguage = lang
     dock.querySelector('.proactive-sales-heading strong').textContent =
       lang === 'en' ? 'Xiao Mu · proactive guide' : '小木 · 主动讲解'
     dock.querySelector('.proactive-sales-toggle').textContent = enabled
@@ -398,31 +419,36 @@
   window.fetch = async (input, init) => {
     const url = requestUrl(input)
     const body = readJsonBody(init)
+    const isChatRequest = url.includes('/api/chat') && Boolean(body?.text)
+
     if (url.includes('/api/tts')) {
       latestTtsUrl = url
       if (typeof body?.voice === 'string' && body.voice) latestVoice = body.voice
-      if (body?.language === 'en' || body?.language === 'zh') latestLanguage = body.language
     }
-    if (url.includes('/api/chat') && body?.text) {
-      resetCadence({ awaitCustomerAnswer: false })
+    if (isChatRequest) suspendCadence()
+
+    let response
+    try {
+      response = await previousFetch(input, init)
+    } catch (error) {
+      if (isChatRequest) resetCadence({ stopSpeech: false, awaitCustomerAnswer: false })
+      throw error
     }
 
-    const response = await previousFetch(input, init)
     try {
       const contentType = response.headers.get('content-type') || ''
       if (contentType.includes('application/json')) {
         const payload = await response.clone().json()
         capturePayload(url, payload)
-        if (url.includes('/api/chat')) {
+        if (url.includes('/api/chat') || url.includes('/api/identity/session/')) {
           resetCadence({
             stopSpeech: false,
             awaitCustomerAnswer: assistantAskedQuestion(payload),
           })
-        } else if (url.includes('/api/identity/session/')) {
-          resetCadence({ stopSpeech: false, awaitCustomerAnswer: false })
         }
       }
     } catch {
+      if (isChatRequest) resetCadence({ stopSpeech: false, awaitCustomerAnswer: false })
       // Proactive narration must never alter the real API response.
     }
     return response
@@ -446,8 +472,7 @@
       const dock = ensureDock()
       if (!isConversationVisible()) {
         dock.hidden = true
-        clearTimer()
-        stopAudio()
+        suspendCadence()
         return
       }
       updateDockLabels()
@@ -476,8 +501,7 @@
   })
 
   window.addEventListener('beforeunload', () => {
-    clearTimer()
-    stopAudio()
+    suspendCadence()
     observer?.disconnect()
   })
 })()
