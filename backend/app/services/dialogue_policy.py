@@ -6,7 +6,13 @@ from .dialogue_context_service import DialogueContext
 
 
 class DialoguePolicy:
-    """Backend policy for clarification, discovery, qualification and recommendation."""
+    """Backend policy for value-first discovery and proactive recommendation.
+
+    The customer should not be forced through a form-like sequence. After one
+    meaningful purchase driver is known, the assistant can already show useful
+    product directions. Additional details refine the recommendation only when
+    the customer volunteers them or explicitly wants to continue.
+    """
 
     def decide(
         self,
@@ -53,8 +59,8 @@ class DialoguePolicy:
                 or "我没有完全听清。请只说一个最重要的条件。",
             )
 
-        # Direct product, promotion, objection and acceptance turns are handled by
-        # the senior-sales policy before another automatic recommendation starts.
+        # Direct questions, objections, promotion requests and explicit acceptance
+        # are handled before any proactive product story is introduced.
         if turn.intent in {
             "ask_reason",
             "general_product_question",
@@ -67,22 +73,25 @@ class DialoguePolicy:
                 reason=f"answer sales intent first: {turn.intent}",
             )
 
-        # Once a recommendation exists, a genuine change to room, budget, style,
-        # living conditions, priority, colour or product preference must recompute
-        # the deterministic recommendation. Area, timeline and decision-stage
-        # updates only qualify the project and should not change the SKU ranking.
-        if profile.recommended_product_ids and self._changes_recommendation(validation):
+        # Once the customer gives one meaningful priority, provide value immediately
+        # instead of asking for room, budget, style, area and timeline in sequence.
+        if not profile.recommended_product_ids and self._profile_is_ready(profile):
             return DialogueDecision(
                 action="recommend_now",
-                reason="customer changed a recommendation-driving requirement",
+                reason="one clear purchase driver is enough for a useful first product story",
             )
 
-        if self._profile_is_ready(profile):
-            if context.pending_slot is not None or validation.can_apply:
-                return DialogueDecision(
-                    action="recommend_now",
-                    reason="profile is sufficient for a useful first recommendation",
-                )
+        # After a recommendation exists, any newly confirmed project detail should
+        # refresh the story around the same products or a newly-ranked pair. This is
+        # more useful than replying with a database-style summary.
+        if profile.recommended_product_ids and (
+            validation.can_apply
+            or turn.intent in {"provide_or_modify_needs", "other"}
+        ):
+            return DialogueDecision(
+                action="recommend_now",
+                reason="refresh product value after new context without starting another questionnaire",
+            )
 
         if validation.needs_clarification:
             return DialogueDecision(
@@ -94,100 +103,50 @@ class DialoguePolicy:
                 or "我已经记录了听清的部分。请再确认一下刚才没有听清的条件。",
             )
 
+        # Only the primary purchase driver is mandatory. All other fields are
+        # optional refinement signals and must not become a forced interview.
         missing_slot = self._next_missing_slot(profile)
         if missing_slot is not None:
             return DialogueDecision(
                 action="ask_missing_slot",
-                reason=f"collect one missing slot: {missing_slot}",
+                reason=f"collect the single minimum discovery signal: {missing_slot}",
                 pending_slot=missing_slot,
                 question=self._question_for_slot(missing_slot),
             )
 
         return DialogueDecision(
             action="acknowledge",
-            reason="state update acknowledged; no further slot is required",
+            reason="customer has enough context; do not ask another automatic question",
         )
-
-    @staticmethod
-    def _changes_recommendation(validation: ValidationResult) -> bool:
-        driving_fields = {
-            "room_type",
-            "style",
-            "budget",
-            "has_pets",
-            "has_floor_heating",
-            "has_children",
-            "has_elderly",
-            "humid_environment",
-        }
-        for action in validation.actions:
-            if action.scope != "persistent":
-                continue
-            if action.kind == "set_field" and action.name in driving_fields:
-                return True
-            if action.kind in {
-                "set_priority",
-                "prefer_color",
-                "reject_color",
-                "prefer_product",
-                "reject_product",
-            }:
-                return True
-        return False
 
     @staticmethod
     def _profile_is_ready(profile: CustomerProfile) -> bool:
-        # Do not repeatedly auto-recommend after the first product set is stored.
         if profile.recommended_product_ids:
             return False
-        if not profile.room_type or not profile.priorities:
-            return False
-        signals = 0
-        signals += int(bool(profile.budget))
-        signals += int(bool(profile.style))
-        signals += int(bool(profile.preferred_colors))
-        signals += int(
-            any(
-                value is not None
-                for value in (
-                    profile.has_pets,
-                    profile.has_floor_heating,
-                    profile.has_children,
-                    profile.has_elderly,
-                    profile.humid_environment,
-                )
-            )
-        )
-        return signals >= 1
+        return bool(profile.priorities or profile.primary_purchase_driver)
 
     @staticmethod
     def _next_missing_slot(profile: CustomerProfile):
-        if not profile.priorities:
+        if not profile.priorities and not profile.primary_purchase_driver:
             return "priority"
-        if not profile.room_type:
-            return "room_type"
-        if not profile.budget:
-            return "budget"
-        if not profile.style:
-            return "style"
-        if profile.recommended_product_ids and profile.estimated_area_sqm is None:
-            return "estimated_area_sqm"
-        if profile.recommended_product_ids and not profile.purchase_timeline:
-            return "purchase_timeline"
-        if not profile.preferred_colors and not profile.rejected_colors:
-            return "preferred_color"
         return None
 
     @staticmethod
     def _question_for_slot(slot):
         questions = {
-            "priority": "这次选地板，您最不愿意妥协的是哪一点：预算、耐磨、防水、脚感、环保，还是日常好清洁？",
-            "room_type": "明白了您的核心关注点。请问这次主要铺在客厅、卧室还是全屋？",
-            "budget": "为了不让推荐偏离实际，您的预算更接近经济、中等、偏高还是高端？",
-            "style": "在满足核心使用需求的前提下，您更喜欢现代简约、北欧原木、新中式还是其他风格？",
-            "project_type": "这次属于新房装修、旧房翻新、局部改造，还是出租房项目？",
-            "estimated_area_sqm": "为了判断组合方案、活动条件和后续报价，请问预计铺装面积大约多少平方米？",
-            "purchase_timeline": "您计划什么时候铺装：1个月内、1到3个月、3个月以上，还是时间待定？",
-            "preferred_color": "为了让方案更接近最终效果，您更喜欢浅灰色、原木色还是深色系？",
+            "priority": (
+                "您不用一次回答很多问题。先告诉我最在意的一点就够了："
+                "预算、耐磨、防水、脚感、环保，还是日常好清洁？"
+            ),
+            "room_type": (
+                "客厅、卧室和全屋的选法差别很大。您方便时告诉我使用空间，"
+                "我就能把不合适的款式直接排除。"
+            ),
+            "budget": "预算可以稍后再定；有明确范围时，我再帮您比较哪些性能值得保留。",
+            "style": "风格不用现在决定；看到产品方向后，再结合采光和家具收窄通常更容易。",
+            "project_type": "新房、旧房翻新和局部改造的重点不同，您愿意继续时再补充即可。",
+            "estimated_area_sqm": "面积只在核对活动或正式报价时需要，现在不用急着提供。",
+            "purchase_timeline": "铺装时间只在安排报价和门店跟进时需要，现在不用急着提供。",
+            "preferred_color": "颜色可以等您先看到材质方向后再决定，不需要现在马上选择。",
         }
         return questions.get(slot)
