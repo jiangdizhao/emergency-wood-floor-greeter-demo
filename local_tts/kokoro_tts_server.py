@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -35,7 +36,7 @@ class LocalTTSRequest(BaseModel):
     text: str = Field(min_length=1)
     language: Language = "en"
     voice: str | None = None
-    speed: float = 1.0
+    speed: float | None = Field(default=None, ge=0.65, le=1.25)
 
 
 runtime = KokoroRuntime(lock=threading.RLock(), inference_lock=threading.Lock())
@@ -43,6 +44,26 @@ runtime = KokoroRuntime(lock=threading.RLock(), inference_lock=threading.Lock())
 DEFAULT_EN_VOICE = os.getenv("KOKORO_EN_VOICE", "am_liam")
 DEFAULT_ZH_VOICE = os.getenv("KOKORO_ZH_VOICE", "zm_yunxi")
 SAMPLE_RATE = int(os.getenv("KOKORO_SAMPLE_RATE", "24000"))
+
+# Kokoro divides predicted duration by speed. Values below 1.0 therefore speak
+# more slowly. Chinese needs a lower default than the previous hard-coded 1.0
+# for a relaxed retail-consultant delivery.
+DEFAULT_ZH_SPEED = float(os.getenv("KOKORO_ZH_SPEED", "0.84"))
+DEFAULT_EN_SPEED = float(os.getenv("KOKORO_EN_SPEED", "0.92"))
+LEGACY_SPEED_ONE_USES_DEFAULT = os.getenv(
+    "KOKORO_LEGACY_SPEED_ONE_USES_DEFAULT",
+    "true",
+).strip().lower() not in {"0", "false", "no", "off"}
+
+# Kokoro's Mandarin pipeline can silently truncate a generated phoneme string
+# above 510 symbols. The upstream sentence splitter recognizes ASCII .!? but
+# not Chinese 。！？ punctuation. Keep Mandarin chunks deliberately short and
+# split on both sentence and clause boundaries before calling the pipeline.
+ZH_MAX_CHARS = max(24, int(os.getenv("KOKORO_ZH_MAX_CHARS", "48")))
+EN_MAX_CHARS = max(120, int(os.getenv("KOKORO_EN_MAX_CHARS", "260")))
+CLAUSE_PAUSE_MS = max(0, int(os.getenv("KOKORO_CLAUSE_PAUSE_MS", "70")))
+SENTENCE_PAUSE_MS = max(0, int(os.getenv("KOKORO_SENTENCE_PAUSE_MS", "150")))
+
 WARMUP_ON_START = os.getenv("KOKORO_WARMUP_ON_START", "true").strip().lower() not in {
     "0",
     "false",
@@ -89,6 +110,95 @@ WARMUP_EN_VOICES = tuple(
 )
 
 
+def _default_speed(language: Language) -> float:
+    return DEFAULT_ZH_SPEED if language == "zh" else DEFAULT_EN_SPEED
+
+
+def _resolve_speed(language: Language, requested_speed: float | None) -> float:
+    if requested_speed is None:
+        return _default_speed(language)
+    # The current Backend sends 1.0 as a legacy constant. Treat that legacy
+    # value as "use the language default" so this server-side fix is backwards
+    # compatible without requiring the Backend and TTS server to update in lockstep.
+    if LEGACY_SPEED_ONE_USES_DEFAULT and abs(requested_speed - 1.0) < 1e-9:
+        return _default_speed(language)
+    return requested_speed
+
+
+def _find_safe_cut(text: str, limit: int, language: Language) -> int:
+    if len(text) <= limit:
+        return len(text)
+
+    break_chars = "。！？!?；;，、：,: \t" if language == "zh" else ".!?;,: \t"
+    minimum = max(1, int(limit * 0.55))
+    for index in range(limit, minimum - 1, -1):
+        if text[index - 1] in break_chars:
+            return index
+    return limit
+
+
+def _split_text_for_kokoro(text: str, language: Language) -> list[str]:
+    normalized = re.sub(r"[ \t]+", " ", text.replace("\r\n", "\n").replace("\r", "\n")).strip()
+    if not normalized:
+        return []
+
+    limit = ZH_MAX_CHARS if language == "zh" else EN_MAX_CHARS
+    boundary_chars = "。！？!?；;\n，、：,:" if language == "zh" else ".!?;\n"
+    units: list[str] = []
+    buffer: list[str] = []
+
+    for character in normalized:
+        buffer.append(character)
+        if character in boundary_chars:
+            unit = "".join(buffer).strip()
+            if unit:
+                units.append(unit)
+            buffer = []
+    if buffer:
+        unit = "".join(buffer).strip()
+        if unit:
+            units.append(unit)
+
+    chunks: list[str] = []
+    current = ""
+    joiner = "" if language == "zh" else " "
+
+    def flush_current() -> None:
+        nonlocal current
+        if current.strip():
+            chunks.append(current.strip())
+        current = ""
+
+    for unit in units:
+        remaining = unit
+        while len(remaining) > limit:
+            flush_current()
+            cut = _find_safe_cut(remaining, limit, language)
+            piece = remaining[:cut].strip()
+            if piece:
+                chunks.append(piece)
+            remaining = remaining[cut:].strip()
+
+        if not remaining:
+            continue
+        candidate = remaining if not current else current + joiner + remaining
+        if len(candidate) <= limit:
+            current = candidate
+        else:
+            flush_current()
+            current = remaining
+
+    flush_current()
+    return chunks
+
+
+def _pause_samples(graphemes: str) -> int:
+    stripped = graphemes.rstrip()
+    sentence_endings = ("。", "！", "？", ".", "!", "?")
+    pause_ms = SENTENCE_PAUSE_MS if stripped.endswith(sentence_endings) else CLAUSE_PAUSE_MS
+    return int(SAMPLE_RATE * pause_ms / 1000)
+
+
 def _load_pipeline(language: Language):
     with runtime.lock:
         try:
@@ -121,23 +231,51 @@ def _synthesize_wav(
     # so simultaneous requests cannot mutate the same pipeline state.
     with runtime.inference_lock:
         pipeline = _load_pipeline(language)
-        generator = pipeline(
-            text,
-            voice=voice,
-            speed=speed,
-            split_pattern=r"\n+",
+        text_chunks = _split_text_for_kokoro(text, language)
+        if not text_chunks:
+            raise RuntimeError("Text produced no Kokoro chunks.")
+
+        print(
+            f"Kokoro synth language={language} voice={voice} speed={speed:.2f} "
+            f"characters={len(text)} text_chunks={len(text_chunks)}",
+            flush=True,
         )
 
-        chunks = []
-        for _graphemes, _phonemes, audio in generator:
-            chunks.append(audio)
+        # A list bypasses the upstream regex splitter. This matters for Mandarin:
+        # upstream currently splits non-English text on ASCII punctuation and may
+        # truncate a >510-symbol phoneme sequence even when Chinese punctuation is present.
+        generator = pipeline(
+            text_chunks,
+            voice=voice,
+            speed=speed,
+            split_pattern=None,
+        )
 
-        if not chunks:
+        generated_chunks: list[tuple[str, object]] = []
+        for graphemes, _phonemes, audio in generator:
+            if audio is not None:
+                generated_chunks.append((str(graphemes), audio))
+
+        if not generated_chunks:
             raise RuntimeError("Kokoro returned no audio chunks.")
 
         import numpy as np
 
-        merged = np.concatenate(chunks) if len(chunks) > 1 else chunks[0]
+        merged_parts = []
+        for index, (graphemes, audio) in enumerate(generated_chunks):
+            if hasattr(audio, "detach"):
+                array = audio.detach().cpu().numpy()
+            else:
+                array = np.asarray(audio)
+            array = np.asarray(array, dtype=np.float32).reshape(-1)
+            merged_parts.append(array)
+
+            if index < len(generated_chunks) - 1:
+                pause_length = _pause_samples(graphemes)
+                if pause_length > 0:
+                    merged_parts.append(np.zeros(pause_length, dtype=np.float32))
+
+        merged = np.concatenate(merged_parts)
         buffer = io.BytesIO()
         sf.write(buffer, merged, SAMPLE_RATE, format="WAV")
         return buffer.getvalue()
@@ -145,9 +283,12 @@ def _synthesize_wav(
 
 def _warmup_voice_group(*, language: Language, voices: tuple[str, ...], text: str) -> None:
     label = "English" if language == "en" else "Mandarin"
-    speed = 1.0
+    speed = _default_speed(language)
     text = text.strip()
-    print(f"Warming up Kokoro {label} voices: " + ", ".join(voices), flush=True)
+    print(
+        f"Warming up Kokoro {label} voices at speed {speed:.2f}: " + ", ".join(voices),
+        flush=True,
+    )
 
     for voice in voices:
         started = time.perf_counter()
@@ -212,7 +353,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="Local Kokoro TTS Server",
-    version="0.4.0",
+    version="0.5.0",
     description="Standalone bilingual local TTS server for the wood-floor greeter demo.",
     lifespan=lifespan,
 )
@@ -260,12 +401,20 @@ def health() -> dict:
         return {
             "ok": True,
             "engine": "kokoro",
+            "version": app.version,
             "loaded_en": runtime.en_pipeline is not None,
             "loaded_zh": runtime.zh_pipeline is not None,
             "loaded_at": runtime.loaded_at,
             "load_error": runtime.load_error,
             "default_en_voice": DEFAULT_EN_VOICE,
             "default_zh_voice": DEFAULT_ZH_VOICE,
+            "default_en_speed": DEFAULT_EN_SPEED,
+            "default_zh_speed": DEFAULT_ZH_SPEED,
+            "legacy_speed_one_uses_default": LEGACY_SPEED_ONE_USES_DEFAULT,
+            "zh_max_chars_per_chunk": ZH_MAX_CHARS,
+            "en_max_chars_per_chunk": EN_MAX_CHARS,
+            "clause_pause_ms": CLAUSE_PAUSE_MS,
+            "sentence_pause_ms": SENTENCE_PAUSE_MS,
             "sample_rate": SAMPLE_RATE,
             "warmup_enabled": WARMUP_ON_START,
             "warmup_ready": zh_ready and en_ready,
@@ -287,7 +436,14 @@ def health() -> dict:
         }
 
 
-def _audio_response(audio: bytes, language: str, voice: str, cache_status: str) -> Response:
+def _audio_response(
+    audio: bytes,
+    language: str,
+    voice: str,
+    speed: float,
+    text_chunk_count: int,
+    cache_status: str,
+) -> Response:
     return Response(
         content=audio,
         media_type="audio/wav",
@@ -296,6 +452,8 @@ def _audio_response(audio: bytes, language: str, voice: str, cache_status: str) 
             "X-TTS-Provider": "kokoro-local",
             "X-TTS-Voice": voice,
             "X-TTS-Language": language,
+            "X-TTS-Speed": f"{speed:.2f}",
+            "X-TTS-Text-Chunks": str(text_chunk_count),
             "X-TTS-Cache": cache_status,
         },
     )
@@ -309,7 +467,9 @@ def tts(request: LocalTTSRequest) -> Response:
 
     language = request.language
     voice = request.voice or (DEFAULT_ZH_VOICE if language == "zh" else DEFAULT_EN_VOICE)
-    cache_key = (language, voice, request.speed, text)
+    speed = _resolve_speed(language, request.speed)
+    text_chunk_count = len(_split_text_for_kokoro(text, language))
+    cache_key = (language, voice, speed, text)
 
     with runtime.lock:
         cached_audio = runtime.warmup_cache.get(cache_key)
@@ -318,6 +478,8 @@ def tts(request: LocalTTSRequest) -> Response:
             audio=cached_audio,
             language=language,
             voice=voice,
+            speed=speed,
+            text_chunk_count=text_chunk_count,
             cache_status="warmup-hit",
         )
 
@@ -326,12 +488,14 @@ def tts(request: LocalTTSRequest) -> Response:
             text=text,
             language=language,
             voice=voice,
-            speed=request.speed,
+            speed=speed,
         )
         return _audio_response(
             audio=audio,
             language=language,
             voice=voice,
+            speed=speed,
+            text_chunk_count=text_chunk_count,
             cache_status="miss",
         )
     except Exception as exc:  # pragma: no cover - runtime environment specific
