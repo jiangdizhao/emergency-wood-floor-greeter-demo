@@ -15,6 +15,9 @@ jobs:
           python-version: "3.11"
       - name: Compile backend and local TTS Python sources
         run: python -m compileall -q backend/app backend/scripts local_tts
+      - name: Verify Mandarin acronym pronunciation
+        working-directory: local_tts
+        run: python verify_mandarin_latin_pronunciation.py
 
   frontend-build:
     runs-on: ubuntu-latest
