@@ -34,7 +34,12 @@ $ttsStartText = Get-Content -Raw -Encoding UTF8 $TtsStart
 
 $requiredProactivePatterns = @(
     'IDLE_DELAYS_MS = [8000, 10000, 10000, 14000]',
+    'QUESTION_RESPONSE_DELAY_MS = 45000',
     'MAX_PROACTIVE_STEPS',
+    'waitingForCustomerAnswer',
+    'assistantAskedQuestion',
+    'last_assistant_question',
+    'needs_clarification',
     'contact_prompt_eligible',
     'Get My Plan and Follow-Up',
     '获取方案与后续联系',
@@ -56,7 +61,7 @@ if (-not $index.Contains('proactive-sales-dock')) {
 }
 
 $requiredTtsPatterns = @(
-    'version="0.7.0"',
+    'version="0.7.1"',
     'KOKORO_ZH_PROSODY_MODE',
     'ZH_VOICE_SPEEDS',
     '_soft_mandarin_prosody',
@@ -82,6 +87,7 @@ if (-not $ttsStartText.Contains("KOKORO_SENTENCE_PAUSE_MS = '0'")) {
 
 Write-Host 'Proactive sales and natural TTS static check passed.' -ForegroundColor Green
 Write-Host 'Idle narration cadence: 8s, 10s, 10s, 14s; then stop until customer activity.'
+Write-Host 'Assistant-question response window: 45s; customer activity restarts the full window.'
 Write-Host 'Product, collection, promotion and optional contact stories: enabled.'
 Write-Host 'Listening, typing, processing and speaking interruption guards: enabled.'
 Write-Host 'Mandarin soft prosody: enabled.'
