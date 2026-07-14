@@ -3,7 +3,7 @@ param(
     [string]$HostAddress = '127.0.0.1',
     [string]$CondaEnvName = 'kokoro-tts',
     [string]$PythonExe = '',
-    [double]$ChineseSpeed = 0.86,
+    [double]$ChineseSpeed = 0.92,
     [double]$EnglishSpeed = 0.92,
     [int]$ChineseChunkChars = 78,
     [ValidateSet('original', 'soft', 'neutral')]
@@ -77,7 +77,7 @@ $env:KOKORO_EN_SPEED = $EnglishSpeed.ToString($InvariantCulture)
 $env:KOKORO_ZH_MAX_CHARS = $ChineseChunkChars.ToString($InvariantCulture)
 $env:KOKORO_ZH_PROSODY_MODE = $ChineseProsodyMode
 $env:KOKORO_ZH_TRANSLITERATE_LATIN = 'true'
-$env:KOKORO_ZH_VOICE_SPEEDS = 'zm_yunxi=0.86,zm_yunjian=0.84,zm_yunxia=0.90,zm_yunyang=0.87'
+$env:KOKORO_ZH_VOICE_SPEEDS = 'zm_yunxi=0.92,zm_yunjian=0.92,zm_yunxia=0.92,zm_yunyang=0.92'
 $env:KOKORO_LEGACY_SPEED_ONE_USES_DEFAULT = 'true'
 $env:KOKORO_CLAUSE_PAUSE_MS = '0'
 $env:KOKORO_SENTENCE_PAUSE_MS = '0'
