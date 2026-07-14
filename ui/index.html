@@ -210,7 +210,18 @@
         })
       })()
     </script>
-    <script src="/proactive-sales.js"></script>
+    <script>
+      (() => {
+        // A paused state used to persist in localStorage while the only Resume button
+        // lived inside a dock that stayed hidden until narration ran. That created a
+        // permanent deadlock after refresh: disabled narration, hidden dock, no way to
+        // resume. Proactive guidance now starts enabled on every page load; pausing is
+        // limited to the current loaded page and can still be resumed from the dock.
+        localStorage.removeItem('woodfloor_proactive_sales_enabled')
+        window.__WOODFLOOR_PROACTIVE_BOOTSTRAP_VERSION__ = '2026-07-14.2'
+      })()
+    </script>
+    <script src="/proactive-sales.js?v=20260714-2"></script>
   </head>
   <body>
     <div id="root"></div>
