@@ -55,25 +55,16 @@ class SalesKnowledgeService:
     def new_customer_greeting(self) -> str:
         company = self.company_profile()
         consultant = str(company.get("consultant_name") or "小木")
-        role = str(company.get("consultant_role") or "地板选购顾问")
-        positioning = self._sentence_fragment(
-            str(company.get("positioning") or "木地板整体选购顾问门店")
-        )
-        value = self._sentence_fragment(
-            str(company.get("consultant_value_proposition") or "帮助您比较不同地板方案的价值与取舍")
-        )
+        role = str(company.get("consultant_role") or "高级地板选购顾问")
+        company_name = str(company.get("company_name") or "木地板体验店")
         highlights = list(company.get("opening_highlights") or [])[:4]
         highlight_text = "、".join(str(item) for item in highlights if str(item).strip())
-        question = str(
-            company.get("opening_question")
-            or "这次选地板，您最重视预算、耐磨、防水、脚感、环保，还是日常好清洁？"
-        ).strip()
         return (
-            f"您好，欢迎来到{company.get('company_name', '木地板体验店')}。"
-            f"我是{consultant}，也是这里的{role}。我们是一家{positioning}，"
-            f"我会{value}。"
-            + (f"门店目前重点提供{highlight_text}。" if highlight_text else "")
-            + question
+            f"您好，欢迎来到{company_name}。我是{consultant}，也是这里的{role}。"
+            "我不会让您一开始就回答一长串问题，而是先根据您最看重的一点，"
+            "拿两款有代表性的产品把差别讲清楚。"
+            + (f"门店主要有{highlight_text}四条选购路线。" if highlight_text else "")
+            + "您先告诉我最在意的是耐磨、防水、脚感、好清洁、预算还是环保，我就直接从产品讲起。"
         )
 
     def company_highlights(self, limit: int = 3) -> list[str]:
@@ -89,8 +80,11 @@ class SalesKnowledgeService:
     ) -> list[dict[str, Any]]:
         product_ids = {product.id for product in products}
         driver = profile.primary_purchase_driver or self._primary_driver(profile)
-        scores: list[tuple[int, str, dict[str, Any]]] = []
+        already_presented = set(profile.featured_collection_ids)
+        scores: list[tuple[int, int, str, dict[str, Any]]] = []
+
         for collection in self.collections():
+            collection_id = str(collection.get("collection_id") or "")
             score = 0
             collection_products = {str(item) for item in collection.get("product_ids", [])}
             score += 4 * len(product_ids.intersection(collection_products))
@@ -115,9 +109,13 @@ class SalesKnowledgeService:
             if profile.style and profile.style in searchable:
                 score += 2
             if score > 0:
-                scores.append((score, str(collection.get("collection_id") or ""), collection))
-        scores.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        return [dict(item[2]) for item in scores[:limit]]
+                unseen_rank = 1 if collection_id not in already_presented else 0
+                scores.append((unseen_rank, score, collection_id, collection))
+
+        # Prefer a relevant collection the customer has not heard yet. Once all
+        # relevant collections have been introduced, fall back to the best score.
+        scores.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+        return [dict(item[3]) for item in scores[:limit]]
 
     def product_tradeoffs(self, product: FlooringProduct) -> list[str]:
         tradeoffs: list[str] = []
