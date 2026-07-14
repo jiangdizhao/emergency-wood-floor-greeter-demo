@@ -55,14 +55,17 @@ LEGACY_SPEED_ONE_USES_DEFAULT = os.getenv(
     "true",
 ).strip().lower() not in {"0", "false", "no", "off"}
 
-# Kokoro's Mandarin pipeline can silently truncate a generated phoneme string
-# above 510 symbols. The upstream sentence splitter recognizes ASCII .!? but
-# not Chinese 。！？ punctuation. Keep Mandarin chunks deliberately short and
-# split on both sentence and clause boundaries before calling the pipeline.
-ZH_MAX_CHARS = max(24, int(os.getenv("KOKORO_ZH_MAX_CHARS", "48")))
+# Mandarin still needs explicit length control because the upstream pipeline can
+# truncate phoneme strings above 510 symbols. Use fewer, larger chunks so the
+# model's own punctuation prosody is preserved without creating many artificial
+# utterance boundaries.
+ZH_MAX_CHARS = max(24, int(os.getenv("KOKORO_ZH_MAX_CHARS", "88")))
 EN_MAX_CHARS = max(120, int(os.getenv("KOKORO_EN_MAX_CHARS", "260")))
-CLAUSE_PAUSE_MS = max(0, int(os.getenv("KOKORO_CLAUSE_PAUSE_MS", "70")))
-SENTENCE_PAUSE_MS = max(0, int(os.getenv("KOKORO_SENTENCE_PAUSE_MS", "150")))
+
+# No synthetic silence is inserted by default. Kokoro already models punctuation
+# prosody. These optional values remain available only for controlled experiments.
+CLAUSE_PAUSE_MS = max(0, int(os.getenv("KOKORO_CLAUSE_PAUSE_MS", "0")))
+SENTENCE_PAUSE_MS = max(0, int(os.getenv("KOKORO_SENTENCE_PAUSE_MS", "0")))
 
 WARMUP_ON_START = os.getenv("KOKORO_WARMUP_ON_START", "true").strip().lower() not in {
     "0",
@@ -143,7 +146,9 @@ def _split_text_for_kokoro(text: str, language: Language) -> list[str]:
         return []
 
     limit = ZH_MAX_CHARS if language == "zh" else EN_MAX_CHARS
-    boundary_chars = "。！？!?；;\n，、：,:" if language == "zh" else ".!?;\n"
+    # Prefer complete sentences as units. Commas and colons are used only as a
+    # fallback cut point when one sentence would otherwise exceed the safe limit.
+    boundary_chars = "。！？!?；;\n" if language == "zh" else ".!?;\n"
     units: list[str] = []
     buffer: list[str] = []
 
@@ -270,6 +275,8 @@ def _synthesize_wav(
             array = np.asarray(array, dtype=np.float32).reshape(-1)
             merged_parts.append(array)
 
+            # Normally zero because artificial pauses are disabled. Keeping this
+            # branch configurable makes A/B testing possible without another code change.
             if index < len(generated_chunks) - 1:
                 pause_length = _pause_samples(graphemes)
                 if pause_length > 0:
@@ -353,7 +360,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="Local Kokoro TTS Server",
-    version="0.5.0",
+    version="0.5.1",
     description="Standalone bilingual local TTS server for the wood-floor greeter demo.",
     lifespan=lifespan,
 )
