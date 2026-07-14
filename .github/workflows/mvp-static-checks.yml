@@ -28,6 +28,11 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: ui/package-lock.json
+      - name: Check public runtime scripts
+        run: |
+          node --check public/proactive-sales.js
+          node --check public/bilingual-ui.js
+          node --check public/bilingual-network.js
       - name: Install frontend dependencies
         run: npm ci
       - name: Build frontend
