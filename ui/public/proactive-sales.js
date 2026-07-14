@@ -37,10 +37,53 @@
     },
   }
 
+  const productEnglish = {
+    'WF-SPC-001': {
+      name: 'Light Grey Spruce SPC Click Flooring',
+      type: 'SPC',
+      color: 'light grey',
+      selling_points: ['strong water resistance', 'high wear resistance'],
+    },
+    'WF-WOOD-002': {
+      name: 'Natural Oak Engineered Wood Flooring',
+      type: 'engineered wood',
+      color: 'natural oak',
+      selling_points: ['natural underfoot feel', 'authentic wood grain'],
+    },
+    'WF-LAM-003': {
+      name: 'Morning Mist Grey Laminate Flooring',
+      type: 'laminate',
+      color: 'grey tone',
+      selling_points: ['strong value for money', 'good wear resistance'],
+    },
+    'WF-SPC-004': {
+      name: 'Dark Walnut Waterproof SPC Flooring',
+      type: 'SPC',
+      color: 'dark walnut',
+      selling_points: ['rich dark-walnut appearance', 'strong water and wear resistance'],
+    },
+    'WF-WOOD-005': {
+      name: 'Warm Light Oak Three-Layer Wood Flooring',
+      type: 'three-layer wood',
+      color: 'light oak',
+      selling_points: ['comfortable underfoot feel', 'authentic natural wood texture'],
+    },
+    'WF-LAM-006': {
+      name: 'Cream White High-Wear Laminate Flooring',
+      type: 'laminate',
+      color: 'cream white',
+      selling_points: ['bright cream-white appearance', 'wear-resistant and easy to maintain'],
+    },
+  }
+
   function language() {
     const configured = window.__WOODFLOOR_LANGUAGE__
     const stored = localStorage.getItem('woodfloor_ui_language')
     return configured === 'en' || stored === 'en' ? 'en' : 'zh'
+  }
+
+  function containsChinese(value) {
+    return typeof value === 'string' && /[\u3400-\u4dbf\u4e00-\u9fff]/.test(value)
   }
 
   function requestUrl(input) {
@@ -135,15 +178,29 @@
     return output
   }
 
+  function englishProduct(product) {
+    const mapped = productEnglish[product?.id]
+    if (mapped) return mapped
+    return {
+      name: `Flooring option ${product?.id || ''}`.trim(),
+      type: 'flooring',
+      color: 'a coordinated colour direction',
+      selling_points: ['a practical balance of performance and maintenance', 'a useful comparison point'],
+    }
+  }
+
   function productStory(product, alternate = false) {
     const lang = language()
-    const points = Array.isArray(product?.selling_points) ? product.selling_points.filter(Boolean).slice(0, 2) : []
-    const pointText = points.join(lang === 'en' ? ' and ' : '、')
     if (lang === 'en') {
+      const localized = englishProduct(product)
+      const pointText = localized.selling_points.slice(0, 2).join(' and ')
       return alternate
-        ? `While you take your time, here is another useful direction. ${product.name} is a ${product.type} option in ${product.color}; ${pointText || 'it provides a different balance of appearance, maintenance and budget'}. It is worth keeping as a contrast rather than deciding from one material alone.`
-        : `You can take your time. One representative option is ${product.name}. Its useful strengths are ${pointText || 'a practical balance of performance, appearance and maintenance'}, so it gives you a concrete reference before we narrow the project details.`
+        ? `While you take your time, here is another useful direction. ${localized.name} is a ${localized.type} option in ${localized.color}; ${pointText}. It is worth keeping as a contrast rather than deciding from one material alone.`
+        : `You can take your time. One representative option is ${localized.name}. Its useful strengths are ${pointText}, so it gives you a concrete reference before we narrow the project details.`
     }
+
+    const points = Array.isArray(product?.selling_points) ? product.selling_points.filter(Boolean).slice(0, 2) : []
+    const pointText = points.join('、')
     return alternate
       ? `您可以慢慢看，我再补充一个不同方向。${product.name}属于${product.type}路线，颜色是${product.color}，特点是${pointText || '在外观、维护和预算之间提供另一种平衡'}。先把它作为对照保留下来，比只看一种材料更容易判断取舍。`
       : `您可以先慢慢感受。我先补充一款有代表性的产品，${product.name}的主要特点是${pointText || '兼顾性能、外观与日常维护'}。先有一个具体产品作参照，后面再收窄空间、预算或颜色会更轻松。`
@@ -152,7 +209,7 @@
   function collectionStory() {
     const driver = latestProfile?.primary_purchase_driver || Object.keys(latestProfile?.priorities || {})[0] || ''
     if (language() === 'en') {
-      if (String(driver).toLowerCase().includes('wear')) {
+      if (String(driver).toLowerCase().includes('wear') || String(driver).includes('耐磨')) {
         return 'For a wear-resistance-first project, the store does not look at the rating alone. The durable easy-care family route also considers cleaning frequency, pets or children, water exposure and the real traffic level of the room, so the recommendation is based on how the home is actually used.'
       }
       return 'Our store works with four practical routes: durable easy-care family flooring, underfloor-heating-ready options, natural wood comfort and value-focused renovation. The point is not to push every feature at once, but to show which benefit is worth keeping and what trade-off comes with it.'
@@ -167,9 +224,9 @@
     const promotion = latestPromotions[0]
     if (!promotion) return collectionStory()
     if (language() === 'en') {
-      const mapped = promotionEnglish[promotion.promotion_id] || {}
-      const title = mapped.title || promotion.title || 'Current demo promotion'
-      const summary = mapped.summary || 'A demo promotion is currently listed, with exact eligibility and benefits subject to written store confirmation.'
+      const mapped = promotionEnglish[promotion.promotion_id]
+      const title = mapped?.title || 'Current Demo Promotion'
+      const summary = mapped?.summary || 'A demo promotion is currently listed, with exact eligibility and benefits subject to written store confirmation.'
       return `${title}. ${summary} I am mentioning it as useful background only, not as a promise of a discount or final entitlement.`
     }
     const title = promotion.title || '当前演示活动'
@@ -268,11 +325,14 @@
       : latestVoice.startsWith('am_')
         ? 'zm_yunxi'
         : latestVoice || 'zm_yunxi'
+    const speechText = lang === 'en' && containsChinese(text)
+      ? 'Let me continue with the selected flooring options and explain the practical differences.'
+      : text
     try {
       const response = await previousFetch(latestTtsUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
-        body: JSON.stringify({ text, language: lang, provider: 'local', voice }),
+        body: JSON.stringify({ text: speechText, language: lang, provider: 'local', voice }),
       })
       if (!response.ok) throw new Error(`TTS ${response.status}`)
       const blob = await response.blob()
