@@ -1,6 +1,7 @@
 (() => {
   const previousFetch = window.fetch.bind(window)
   const IDLE_DELAYS_MS = [8000, 10000, 10000, 14000]
+  const QUESTION_RESPONSE_DELAY_MS = 45000
   const MAX_PROACTIVE_STEPS = IDLE_DELAYS_MS.length
   const enabledKey = 'woodfloor_proactive_sales_enabled'
   const sessionKey = 'woodfloor_active_session_id'
@@ -17,6 +18,7 @@
   let latestVoice = 'zm_yunxi'
   let latestTtsUrl = 'http://127.0.0.1:8000/api/tts'
   let latestLanguage = language()
+  let waitingForCustomerAnswer = false
   let observer = null
 
   const promotionEnglish = {
@@ -100,6 +102,15 @@
     }
   }
 
+  function assistantAskedQuestion(payload) {
+    if (!payload || typeof payload !== 'object') return false
+    if (payload.needs_clarification === true) return true
+    if (typeof payload.pending_slot === 'string' && payload.pending_slot.trim()) return true
+    if (typeof payload.last_assistant_question === 'string' && payload.last_assistant_question.trim()) return true
+    const answer = typeof payload.answer === 'string' ? payload.answer.trim() : ''
+    return /[?？]\s*$/.test(answer)
+  }
+
   function stopAudio() {
     if (!currentAudio) return
     currentAudio.pause()
@@ -132,22 +143,28 @@
     clearTimer()
     if (!enabled || step >= MAX_PROACTIVE_STEPS || !isConversationVisible()) return
     const token = ++generation
-    const delay = delayOverride ?? IDLE_DELAYS_MS[Math.min(step, IDLE_DELAYS_MS.length - 1)]
+    const delay = delayOverride ?? (
+      waitingForCustomerAnswer
+        ? QUESTION_RESPONSE_DELAY_MS
+        : IDLE_DELAYS_MS[Math.min(step, IDLE_DELAYS_MS.length - 1)]
+    )
     timer = window.setTimeout(() => {
       timer = null
       if (token !== generation || !enabled || !isConversationVisible()) return
       if (isInteractionBusy()) {
-        schedule(1800)
+        schedule(waitingForCustomerAnswer ? QUESTION_RESPONSE_DELAY_MS : 1800)
         return
       }
+      waitingForCustomerAnswer = false
       void deliverStep()
     }, delay)
   }
 
-  function resetCadence({ stopSpeech = true } = {}) {
+  function resetCadence({ stopSpeech = true, awaitCustomerAnswer = waitingForCustomerAnswer } = {}) {
     generation += 1
     clearTimer()
     step = 0
+    waitingForCustomerAnswer = Boolean(awaitCustomerAnswer)
     if (stopSpeech) stopAudio()
     if (enabled && isConversationVisible()) schedule()
   }
@@ -386,7 +403,9 @@
       if (typeof body?.voice === 'string' && body.voice) latestVoice = body.voice
       if (body?.language === 'en' || body?.language === 'zh') latestLanguage = body.language
     }
-    if (url.includes('/api/chat') && body?.text) resetCadence()
+    if (url.includes('/api/chat') && body?.text) {
+      resetCadence({ awaitCustomerAnswer: false })
+    }
 
     const response = await previousFetch(input, init)
     try {
@@ -394,8 +413,13 @@
       if (contentType.includes('application/json')) {
         const payload = await response.clone().json()
         capturePayload(url, payload)
-        if (url.includes('/api/chat') || url.includes('/api/identity/session/')) {
-          resetCadence({ stopSpeech: false })
+        if (url.includes('/api/chat')) {
+          resetCadence({
+            stopSpeech: false,
+            awaitCustomerAnswer: assistantAskedQuestion(payload),
+          })
+        } else if (url.includes('/api/identity/session/')) {
+          resetCadence({ stopSpeech: false, awaitCustomerAnswer: false })
         }
       }
     } catch {
