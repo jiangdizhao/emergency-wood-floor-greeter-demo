@@ -159,12 +159,17 @@ function installDomainRecognitionPatch() {
   const Original = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition
   if (!Original) return
 
+  // TypeScript does not preserve the null check above inside a nested class
+  // constructor because the value is captured by a closure. Copy it to a
+  // non-optional constructor variable before declaring the wrapper class.
+  const NativeRecognitionClass: NativeRecognitionConstructor = Original
+
   class DomainRecognition implements NativeRecognition {
     private readonly nativeRecognition: NativeRecognition
     private resultHandler: ((event: NativeEvent) => void) | null = null
 
     constructor() {
-      this.nativeRecognition = new Original()
+      this.nativeRecognition = new NativeRecognitionClass()
       this.nativeRecognition.maxAlternatives = 3
       this.nativeRecognition.lang = selectedLanguage() === 'en' ? 'en-US' : 'zh-CN'
     }
