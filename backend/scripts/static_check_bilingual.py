@@ -96,14 +96,23 @@ def main() -> None:
         assert "/bilingual-pages.js" in page, f"Missing utility-page translation on {page_name}"
 
     tts_server = (REPO_ROOT / "local_tts" / "kokoro_tts_server.py").read_text(encoding="utf-8")
+    tts_start = (REPO_ROOT / "local_tts" / "start_kokoro_tts.ps1").read_text(encoding="utf-8")
     downloader = (REPO_ROOT / "local_tts" / "download_english_voices.py").read_text(encoding="utf-8")
     requirements = (REPO_ROOT / "local_tts" / "requirements.txt").read_text(encoding="utf-8")
+    terra_start = (BACKEND_ROOT / "scripts" / "start_backend_terra.ps1").read_text(encoding="utf-8")
     for voice in ("am_liam", "am_michael", "am_puck", "am_onyx"):
         assert voice in tts_server
         assert voice in downloader
     assert 'KPipeline(lang_code="a")' in tts_server
     assert "warmup_en_ready" in tts_server
+    assert 'KOKORO_CLAUSE_PAUSE_MS", "0"' in tts_server
+    assert 'KOKORO_SENTENCE_PAUSE_MS", "0"' in tts_server
+    assert "$env:KOKORO_CLAUSE_PAUSE_MS = '0'" in tts_start
+    assert "$env:KOKORO_SENTENCE_PAUSE_MS = '0'" in tts_start
     assert "huggingface-hub" in requirements
+    assert "SecureStringToBSTR" in terra_start
+    assert "$env:OPENAI_API_KEY = $plainKey" in terra_start
+    assert "OPENAI_API_KEY: configured (value hidden)" in terra_start
 
     print("Bilingual UI and speech static check passed.")
     print("English AnswerPlan localization: yes")
@@ -114,6 +123,8 @@ def main() -> None:
     print("English utility and CRM pages: yes")
     print("English Kokoro voice mapping: am_liam, am_michael, am_puck, am_onyx")
     print("Bilingual Kokoro startup warm-up: yes")
+    print("Kokoro artificial punctuation pauses disabled: yes")
+    print("Secure Terra API-key startup script: yes")
 
 
 if __name__ == "__main__":
