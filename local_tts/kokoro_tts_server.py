@@ -15,6 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from starlette.responses import Response
 
+from mandarin_latin_pronunciation import transliterate_latin_for_mandarin
+
 Language = Literal["zh", "en"]
 
 
@@ -94,6 +96,14 @@ SENTENCE_PAUSE_MS = max(0, int(os.getenv("KOKORO_SENTENCE_PAUSE_MS", "0")))
 ZH_PROSODY_MODE = os.getenv("KOKORO_ZH_PROSODY_MODE", "soft").strip().lower()
 if ZH_PROSODY_MODE not in {"original", "soft", "neutral"}:
     ZH_PROSODY_MODE = "soft"
+
+# Mandarin KPipeline does not reliably pronounce embedded Latin letters. Convert
+# short technical acronyms such as SPC, AC5, ENF and AI to Mandarin-readable letter
+# names before G2P. Screen text and stored conversation text remain unchanged.
+ZH_TRANSLITERATE_LATIN = os.getenv(
+    "KOKORO_ZH_TRANSLITERATE_LATIN",
+    "true",
+).strip().lower() not in {"0", "false", "no", "off"}
 
 TRIM_CHUNK_SILENCE = os.getenv(
     "KOKORO_TRIM_CHUNK_SILENCE",
@@ -185,8 +195,8 @@ def _clean_visible_text_for_speech(text: str, language: Language) -> str:
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     if language == "zh":
         cleaned = cleaned.replace("㎡", " 平方米")
-        cleaned = re.sub(r"\bSPC\b", "S P C", cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r"\bAC\s*([0-9]+)\b", r"A C \1", cleaned, flags=re.IGNORECASE)
+        if ZH_TRANSLITERATE_LATIN:
+            cleaned, _ = transliterate_latin_for_mandarin(cleaned)
     return cleaned
 
 
@@ -382,7 +392,8 @@ def _synthesize_wav(
         print(
             f"Kokoro synth language={language} voice={voice} speed={speed:.2f} "
             f"characters={len(text)} text_chunks={len(source_chunks)} "
-            f"zh_prosody_mode={ZH_PROSODY_MODE}",
+            f"zh_prosody_mode={ZH_PROSODY_MODE} "
+            f"zh_latin_transliteration={language == 'zh' and ZH_TRANSLITERATE_LATIN}",
             flush=True,
         )
 
@@ -489,7 +500,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="Local Kokoro TTS Server",
-    version="0.7.0",
+    version="0.7.1",
     description="Standalone bilingual local TTS server for the wood-floor greeter demo.",
     lifespan=lifespan,
 )
@@ -551,6 +562,7 @@ def health() -> dict:
             "sentence_pause_ms": SENTENCE_PAUSE_MS,
             "zh_prosody_mode": ZH_PROSODY_MODE,
             "zh_punctuation_neutralized": ZH_PROSODY_MODE == "neutral",
+            "zh_latin_transliteration": ZH_TRANSLITERATE_LATIN,
             "trim_chunk_silence": TRIM_CHUNK_SILENCE,
             "silence_threshold_db": SILENCE_THRESHOLD_DB,
             "silence_pad_ms": SILENCE_PAD_MS,
@@ -594,6 +606,9 @@ def _audio_response(
             "X-TTS-Speed": f"{speed:.2f}",
             "X-TTS-Text-Chunks": str(text_chunk_count),
             "X-TTS-ZH-Prosody-Mode": ZH_PROSODY_MODE if language == "zh" else "n/a",
+            "X-TTS-ZH-Latin-Transliteration": str(
+                language == "zh" and ZH_TRANSLITERATE_LATIN
+            ).lower(),
             "X-TTS-Punctuation-Neutralized": str(
                 language == "zh" and ZH_PROSODY_MODE == "neutral"
             ).lower(),
