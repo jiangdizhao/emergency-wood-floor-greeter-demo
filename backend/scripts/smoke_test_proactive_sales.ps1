@@ -37,11 +37,8 @@ $salesKnowledgeText = Get-Content -Raw -Encoding UTF8 $SalesKnowledge
 $requiredProactivePatterns = @(
     'IDLE_DELAYS_MS = [8000, 10000, 10000, 14000]',
     'QUESTION_RESPONSE_DELAY_MS = 45000',
-    'QUESTION_BUSY_RETRY_MS = 1800',
-    'QUESTION_BUSY_MAX_WAIT_MS = 10000',
+    'BUSY_RETRY_MS = 500',
     'waitingForCustomerAnswer',
-    'questionWaitAtSchedule',
-    'questionBusyDeadline',
     'assistantAskedQuestion',
     'payload.greeting',
     'suspendCadence',
@@ -52,8 +49,12 @@ $requiredProactivePatterns = @(
     'Get My Plan and Follow-Up',
     '获取方案与后续联系',
     'proactive_sales_enabled',
-    'status-pulse.listening',
-    'currentAudio'
+    'isMainAgentBusy',
+    'proactiveInFlight',
+    'status-pulse.listening, .status-pulse.processing, .status-pulse.speaking',
+    'if (isInteractionBusy())',
+    'schedule(delay)',
+    'token !== generation'
 )
 foreach ($pattern in $requiredProactivePatterns) {
     if (-not $proactive.Contains($pattern)) {
@@ -61,10 +62,21 @@ foreach ($pattern in $requiredProactivePatterns) {
     }
 }
 
+$forbiddenProactivePatterns = @(
+    'QUESTION_BUSY_MAX_WAIT_MS',
+    'questionBusyDeadline',
+    'void deliverStep()'
+)
+foreach ($pattern in $forbiddenProactivePatterns) {
+    if ($proactive.Contains($pattern)) {
+        throw "Unsafe proactive interruption contract remains: $pattern"
+    }
+}
+
 $requiredBootstrapPatterns = @(
     "localStorage.removeItem('woodfloor_proactive_sales_enabled')",
-    "window.__WOODFLOOR_PROACTIVE_BOOTSTRAP_VERSION__ = '2026-07-14.2'",
-    '/proactive-sales.js?v=20260714-2'
+    "window.__WOODFLOOR_PROACTIVE_BOOTSTRAP_VERSION__ = '2026-07-14.3'",
+    '/proactive-sales.js?v=20260714-3'
 )
 foreach ($pattern in $requiredBootstrapPatterns) {
     if (-not $index.Contains($pattern)) {
@@ -124,12 +136,12 @@ if (-not $ttsStartText.Contains("KOKORO_SENTENCE_PAUSE_MS = '0'")) {
 
 Write-Host 'Proactive sales, customer greeting and natural TTS static check passed.' -ForegroundColor Green
 Write-Host 'Normal idle narration cadence: 8s, 10s, 10s, 14s; then stop until customer activity.'
-Write-Host 'Assistant-question response window: 45s from both chat answers and the opening greeting.'
-Write-Host 'After the 45s grace period, busy UI state is retried every 1.8s and cannot suppress narration indefinitely.'
+Write-Host 'Assistant-question response window: 45 seconds of continuous idle time after the agent finishes speaking.'
+Write-Host 'Any processing, listening or speaking state cancels the countdown and restarts it only after the normal agent is idle.'
+Write-Host 'Proactive narration cannot force delivery through an active agent turn.'
 Write-Host 'A stale browser pause flag is cleared before proactive-sales.js loads, and the script URL is cache-busted.'
 Write-Host 'Customer greeting describes store capabilities and products, not internal dialogue-design rules.'
 Write-Host 'Product, collection, promotion and optional contact stories: enabled.'
-Write-Host 'Listening, typing, processing and speaking interruption guards: enabled.'
 Write-Host 'Mandarin soft prosody: enabled.'
 Write-Host 'Synthetic punctuation silence: disabled.'
 Write-Host 'Per-voice pacing and natural edge padding: enabled.'
