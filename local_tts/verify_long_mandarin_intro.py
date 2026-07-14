@@ -47,7 +47,7 @@ def synthesize(base_url: str, voice: str, output_path: Path) -> tuple[dict[str, 
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify continuous Mandarin Kokoro synthesis.")
+    parser = argparse.ArgumentParser(description="Verify natural Mandarin Kokoro synthesis.")
     parser.add_argument("--base-url", default="http://127.0.0.1:8010")
     parser.add_argument("--voice", default="zm_yunxi")
     parser.add_argument("--output", default="kokoro_long_mandarin_intro.wav")
@@ -69,7 +69,7 @@ def main() -> int:
 
     speed = float(headers.get("x-tts-speed", "0"))
     chunk_count = int(headers.get("x-tts-text-chunks", "0"))
-    punctuation_neutralized = headers.get("x-tts-punctuation-neutralized", "false") == "true"
+    prosody_mode = headers.get("x-tts-zh-prosody-mode", "")
     silence_trimmed = headers.get("x-tts-silence-trimmed", "false") == "true"
     clause_pause_ms = int(health.get("clause_pause_ms") or 0)
     sentence_pause_ms = int(health.get("sentence_pause_ms") or 0)
@@ -77,13 +77,15 @@ def main() -> int:
     result = {
         "server_version": health.get("version"),
         "configured_zh_speed": health.get("default_zh_speed"),
+        "configured_voice_speed": (health.get("zh_voice_speeds") or {}).get(args.voice),
         "effective_response_speed": speed,
         "zh_max_chars_per_chunk": health.get("zh_max_chars_per_chunk"),
         "response_text_chunks": chunk_count,
         "clause_pause_ms": clause_pause_ms,
         "sentence_pause_ms": sentence_pause_ms,
-        "zh_punctuation_neutralized": punctuation_neutralized,
+        "zh_prosody_mode": prosody_mode,
         "trim_chunk_silence": silence_trimmed,
+        "silence_threshold_db": health.get("silence_threshold_db"),
         "silence_pad_ms": health.get("silence_pad_ms"),
         "chunk_crossfade_ms": health.get("chunk_crossfade_ms"),
         "introduction_characters": len(INTRODUCTION),
@@ -101,17 +103,20 @@ def main() -> int:
     if clause_pause_ms != 0 or sentence_pause_ms != 0:
         print("FAIL: synthetic punctuation pauses are still enabled.", file=sys.stderr)
         return 4
-    if not punctuation_neutralized:
-        print("FAIL: Mandarin punctuation neutralization is not active.", file=sys.stderr)
+    if prosody_mode != "soft":
+        print("FAIL: soft Mandarin prosody is not active.", file=sys.stderr)
         return 5
     if not silence_trimmed:
         print("FAIL: generated chunk-edge silence trimming is not active.", file=sys.stderr)
         return 6
+    if int(health.get("silence_pad_ms") or 0) < 15:
+        print("FAIL: chunk trimming is too aggressive to preserve natural word endings.", file=sys.stderr)
+        return 7
     if duration <= 0:
         print("FAIL: the WAV file contains no playable duration.", file=sys.stderr)
-        return 7
+        return 8
 
-    print("PASS: Mandarin uses safe chunks, neutralized punctuation, trimmed edges and crossfaded continuous audio.")
+    print("PASS: Mandarin uses soft prosody, per-voice pacing, natural edge padding and no synthetic pauses.")
     return 0
 
 
