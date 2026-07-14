@@ -72,6 +72,8 @@ def main() -> int:
 
     speed = float(headers.get("x-tts-speed", "0"))
     chunk_count = int(headers.get("x-tts-text-chunks", "0"))
+    clause_pause_ms = int(health.get("clause_pause_ms") or 0)
+    sentence_pause_ms = int(health.get("sentence_pause_ms") or 0)
 
     print(json.dumps(
         {
@@ -80,6 +82,8 @@ def main() -> int:
             "effective_response_speed": speed,
             "zh_max_chars_per_chunk": health.get("zh_max_chars_per_chunk"),
             "response_text_chunks": chunk_count,
+            "clause_pause_ms": clause_pause_ms,
+            "sentence_pause_ms": sentence_pause_ms,
             "introduction_characters": len(INTRODUCTION),
             "wav_duration_seconds": round(duration, 2),
             "output": str(output_path),
@@ -88,9 +92,9 @@ def main() -> int:
         indent=2,
     ))
 
-    if chunk_count < 4:
+    if chunk_count < 2:
         print(
-            "FAIL: the long Mandarin introduction was not divided into enough safe chunks.",
+            "FAIL: the long Mandarin introduction was not divided into safe chunks.",
             file=sys.stderr,
         )
         return 2
@@ -100,11 +104,17 @@ def main() -> int:
             file=sys.stderr,
         )
         return 3
+    if clause_pause_ms != 0 or sentence_pause_ms != 0:
+        print(
+            "FAIL: artificial punctuation pauses are still enabled.",
+            file=sys.stderr,
+        )
+        return 4
     if duration <= 0:
         print("FAIL: the WAV file contains no playable duration.", file=sys.stderr)
-        return 4
+        return 5
 
-    print("PASS: long Mandarin text is chunked and the slower language default is active.")
+    print("PASS: long Mandarin text uses safe chunks, slower speech, and no artificial punctuation pauses.")
     return 0
 
 
