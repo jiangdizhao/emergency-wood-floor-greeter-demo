@@ -61,9 +61,17 @@ foreach ($pattern in $requiredProactivePatterns) {
     }
 }
 
-if (-not $index.Contains('/proactive-sales.js')) {
-    throw 'ui/index.html does not load proactive-sales.js.'
+$requiredBootstrapPatterns = @(
+    "localStorage.removeItem('woodfloor_proactive_sales_enabled')",
+    "window.__WOODFLOOR_PROACTIVE_BOOTSTRAP_VERSION__ = '2026-07-14.2'",
+    '/proactive-sales.js?v=20260714-2'
+)
+foreach ($pattern in $requiredBootstrapPatterns) {
+    if (-not $index.Contains($pattern)) {
+        throw "Missing proactive recovery bootstrap: $pattern"
+    }
 }
+
 if (-not $index.Contains('proactive-sales-dock')) {
     throw 'ui/index.html does not contain proactive sales dock styling.'
 }
@@ -118,6 +126,7 @@ Write-Host 'Proactive sales, customer greeting and natural TTS static check pass
 Write-Host 'Normal idle narration cadence: 8s, 10s, 10s, 14s; then stop until customer activity.'
 Write-Host 'Assistant-question response window: 45s from both chat answers and the opening greeting.'
 Write-Host 'After the 45s grace period, busy UI state is retried every 1.8s and cannot suppress narration indefinitely.'
+Write-Host 'A stale browser pause flag is cleared before proactive-sales.js loads, and the script URL is cache-busted.'
 Write-Host 'Customer greeting describes store capabilities and products, not internal dialogue-design rules.'
 Write-Host 'Product, collection, promotion and optional contact stories: enabled.'
 Write-Host 'Listening, typing, processing and speaking interruption guards: enabled.'
