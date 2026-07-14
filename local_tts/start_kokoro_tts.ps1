@@ -5,7 +5,8 @@ param(
     [string]$PythonExe = '',
     [double]$ChineseSpeed = 0.84,
     [double]$EnglishSpeed = 0.92,
-    [int]$ChineseChunkChars = 88
+    [int]$ChineseChunkChars = 88,
+    [int]$ChunkCrossfadeMs = 8
 )
 
 $ErrorActionPreference = 'Stop'
@@ -67,16 +68,23 @@ if ($EnglishSpeed -lt 0.65 -or $EnglishSpeed -gt 1.25) {
 if ($ChineseChunkChars -lt 24 -or $ChineseChunkChars -gt 120) {
     throw 'ChineseChunkChars must be between 24 and 120.'
 }
+if ($ChunkCrossfadeMs -lt 0 -or $ChunkCrossfadeMs -gt 30) {
+    throw 'ChunkCrossfadeMs must be between 0 and 30.'
+}
 
 $resolvedPython = Resolve-KokoroPython -ExplicitPythonExe $PythonExe -EnvName $CondaEnvName
 
-# These variables are inherited by the Uvicorn process launched below.
 $env:KOKORO_ZH_SPEED = $ChineseSpeed.ToString($InvariantCulture)
 $env:KOKORO_EN_SPEED = $EnglishSpeed.ToString($InvariantCulture)
 $env:KOKORO_ZH_MAX_CHARS = $ChineseChunkChars.ToString($InvariantCulture)
 $env:KOKORO_LEGACY_SPEED_ONE_USES_DEFAULT = 'true'
 $env:KOKORO_CLAUSE_PAUSE_MS = '0'
 $env:KOKORO_SENTENCE_PAUSE_MS = '0'
+$env:KOKORO_ZH_NEUTRALIZE_PUNCTUATION = 'true'
+$env:KOKORO_TRIM_CHUNK_SILENCE = 'true'
+$env:KOKORO_SILENCE_THRESHOLD_DB = '-42'
+$env:KOKORO_SILENCE_PAD_MS = '8'
+$env:KOKORO_CHUNK_CROSSFADE_MS = $ChunkCrossfadeMs.ToString($InvariantCulture)
 
 Write-Host 'Starting local Kokoro TTS server...' -ForegroundColor Green
 Write-Host "Host: $HostAddress" -ForegroundColor Cyan
@@ -88,6 +96,9 @@ Write-Host "Mandarin speed: $($env:KOKORO_ZH_SPEED) (lower is slower)" -Foregrou
 Write-Host "English speed: $($env:KOKORO_EN_SPEED) (lower is slower)" -ForegroundColor Cyan
 Write-Host "Mandarin max characters per chunk: $ChineseChunkChars" -ForegroundColor Cyan
 Write-Host 'Artificial punctuation pauses: disabled' -ForegroundColor Cyan
+Write-Host 'Mandarin punctuation sent to model: neutralized for continuous speech' -ForegroundColor Cyan
+Write-Host 'Chunk-edge silence trimming: enabled' -ForegroundColor Cyan
+Write-Host "Chunk crossfade: $ChunkCrossfadeMs ms" -ForegroundColor Cyan
 Write-Host ''
 
 Write-Host 'Python executable:' -ForegroundColor Yellow
