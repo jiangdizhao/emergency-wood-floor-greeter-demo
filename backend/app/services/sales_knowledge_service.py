@@ -61,10 +61,10 @@ class SalesKnowledgeService:
         highlight_text = "、".join(str(item) for item in highlights if str(item).strip())
         return (
             f"您好，欢迎来到{company_name}。我是{consultant}，也是这里的{role}。"
-            "我不会让您一开始就回答一长串问题，而是先根据您最看重的一点，"
-            "拿两款有代表性的产品把差别讲清楚。"
+            "我可以为您介绍不同材质的特点，比较耐磨、防水、脚感、地暖适配和日常维护的差别，"
+            "并结合实际家庭使用场景给出主推款和备选款。"
             + (f"门店主要有{highlight_text}四条选购路线。" if highlight_text else "")
-            + "您先告诉我最在意的是耐磨、防水、脚感、好清洁、预算还是环保，我就直接从产品讲起。"
+            + "您这次选地板最关注耐磨、防水、脚感、好清洁、预算还是环保？"
         )
 
     def company_highlights(self, limit: int = 3) -> list[str]:
