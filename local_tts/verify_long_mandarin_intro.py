@@ -13,6 +13,8 @@ INTRODUCTION = (
     "我是小木，也是这里的高级地板选购顾问。"
     "我不会让您一开始就回答一长串问题，而是先根据您最看重的一点，"
     "拿两款有代表性的产品把差别讲清楚。"
+    "比如 SPC 锁扣地板适合关注耐磨、防水和日常维护的家庭，"
+    "其中部分产品的耐磨等级可以达到 AC5。"
     "门店主要有耐磨易维护、地暖适配、高品质实木质感和经济实用四条选购路线。"
     "您先告诉我最在意的是耐磨、防水、脚感、好清洁、预算还是环保，我就直接从产品讲起。"
 )
@@ -70,6 +72,7 @@ def main() -> int:
     speed = float(headers.get("x-tts-speed", "0"))
     chunk_count = int(headers.get("x-tts-text-chunks", "0"))
     prosody_mode = headers.get("x-tts-zh-prosody-mode", "")
+    latin_transliteration = headers.get("x-tts-zh-latin-transliteration", "false") == "true"
     silence_trimmed = headers.get("x-tts-silence-trimmed", "false") == "true"
     clause_pause_ms = int(health.get("clause_pause_ms") or 0)
     sentence_pause_ms = int(health.get("sentence_pause_ms") or 0)
@@ -84,6 +87,7 @@ def main() -> int:
         "clause_pause_ms": clause_pause_ms,
         "sentence_pause_ms": sentence_pause_ms,
         "zh_prosody_mode": prosody_mode,
+        "zh_latin_transliteration": latin_transliteration,
         "trim_chunk_silence": silence_trimmed,
         "silence_threshold_db": health.get("silence_threshold_db"),
         "silence_pad_ms": health.get("silence_pad_ms"),
@@ -106,17 +110,24 @@ def main() -> int:
     if prosody_mode != "soft":
         print("FAIL: soft Mandarin prosody is not active.", file=sys.stderr)
         return 5
+    if not latin_transliteration:
+        print("FAIL: Mandarin Latin-acronym pronunciation is not active.", file=sys.stderr)
+        return 6
     if not silence_trimmed:
         print("FAIL: generated chunk-edge silence trimming is not active.", file=sys.stderr)
-        return 6
+        return 7
     if int(health.get("silence_pad_ms") or 0) < 15:
         print("FAIL: chunk trimming is too aggressive to preserve natural word endings.", file=sys.stderr)
-        return 7
+        return 8
     if duration <= 0:
         print("FAIL: the WAV file contains no playable duration.", file=sys.stderr)
-        return 8
+        return 9
 
-    print("PASS: Mandarin uses soft prosody, per-voice pacing, natural edge padding and no synthetic pauses.")
+    print(
+        "PASS: Mandarin uses soft prosody, acronym pronunciation, per-voice pacing, "
+        "natural edge padding and no synthetic pauses."
+    )
+    print("Listen specifically for SPC and AC5 in the generated WAV file.")
     return 0
 
 
