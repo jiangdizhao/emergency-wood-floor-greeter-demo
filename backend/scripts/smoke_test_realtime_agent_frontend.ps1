@@ -7,6 +7,8 @@ $BackendRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $RepoRoot = (Resolve-Path (Join-Path $BackendRoot '..')).Path
 $RuntimeSource = Join-Path $RepoRoot 'ui\src\realtimeAgentRuntime.ts'
 $RecognitionSource = Join-Path $RepoRoot 'ui\src\realtimeSpeechRecognitionV2.ts'
+$CircuitSource = Join-Path $RepoRoot 'ui\src\realtimeOutputCircuitBreaker.ts'
+$MainSource = Join-Path $RepoRoot 'ui\src\main.tsx'
 $RouterSource = Join-Path $BackendRoot 'app\services\turn_router.py'
 $InteractionApiSource = Join-Path $BackendRoot 'app\interaction_api.py'
 
@@ -19,6 +21,8 @@ if ($status.turn_mode -ne "push_to_talk") { throw "Expected push_to_talk mode." 
 
 $runtime = Get-Content -Raw -Encoding UTF8 $RuntimeSource
 $recognition = Get-Content -Raw -Encoding UTF8 $RecognitionSource
+$circuit = Get-Content -Raw -Encoding UTF8 $CircuitSource
+$main = Get-Content -Raw -Encoding UTF8 $MainSource
 $router = Get-Content -Raw -Encoding UTF8 $RouterSource
 $interactionApi = Get-Content -Raw -Encoding UTF8 $InteractionApiSource
 
@@ -49,12 +53,29 @@ $recognitionPatterns = @(
     ".stopOutput()",
     ".then(() => agent.beginCapture())",
     ".endCapture()",
+    "sender.replaceTrack(null)",
+    "window.addEventListener('woodfloor:realtime-connected'",
     "localStorage.setItem(PROVIDER_STORAGE_KEY, REALTIME_PROVIDER)"
 )
 foreach ($pattern in $recognitionPatterns) {
     if (-not $recognition.Contains($pattern)) {
         throw "Missing Realtime recognition contract: $pattern"
     }
+}
+
+$circuitPatterns = @(
+    "CIRCUIT_DURATION_MS = 60_000",
+    "woodfloor_realtime_output_disabled_until",
+    "provider !== 'gpt-realtime'",
+    "woodfloor:realtime-output-fallback"
+)
+foreach ($pattern in $circuitPatterns) {
+    if (-not $circuit.Contains($pattern)) {
+        throw "Missing Realtime output circuit-breaker contract: $pattern"
+    }
+}
+if (-not $main.Contains("import './realtimeOutputCircuitBreaker'")) {
+    throw "The Realtime output circuit breaker is not loaded after the runtime."
 }
 
 $routerPatterns = @(
@@ -82,5 +103,5 @@ if ($recognition.Contains($legacyPerTurnPattern)) {
 
 Write-Host "Persistent GPT Realtime frontend and routing contracts passed." -ForegroundColor Green
 Write-Host "Model configured: $($status.model)"
-Write-Host "The physical microphone is push-to-talk only; a silent negotiated track keeps the session reusable."
-Write-Host "GPT Realtime is the default output; Kokoro remains user-selectable and is used after Realtime output failure."
+Write-Host "The physical microphone is push-to-talk only; the idle sender track is detached after negotiation."
+Write-Host "GPT Realtime is the default output; Kokoro remains user-selectable and a 60-second circuit breaker prevents repeated failed Realtime attempts."
