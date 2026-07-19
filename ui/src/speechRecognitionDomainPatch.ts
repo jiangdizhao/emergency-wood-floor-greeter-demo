@@ -40,6 +40,9 @@ type NativeRecognition = {
 
 type NativeRecognitionConstructor = new () => NativeRecognition
 
+const ASR_PROVIDER_KEY = 'woodfloor_asr_provider'
+const BROWSER_PROVIDER = 'browser'
+
 const ZH_DOMAIN_TERMS = [
   '浅灰色',
   '浅灰',
@@ -126,11 +129,6 @@ function candidateScore(candidate: NativeAlternative): number {
   return score
 }
 
-/**
- * Convert the browser's native SpeechRecognitionEvent into a small plain
- * JavaScript snapshot before reordering alternatives. Native Web Speech
- * objects are host objects and must not be wrapped in Proxy.
- */
 function rankEvent(event: NativeEvent): NativeEvent {
   const rankedResults: NativeResult[] = []
 
@@ -263,19 +261,15 @@ function installDomainRecognitionPatch() {
     onresult: ((event: NativeEvent) => void) | null = null
 
     private delegate: NativeRecognition | RecognitionLike | null = null
+    private fallbackStarted = false
 
     start() {
       try {
-        this.delegate = realtimeAsrSelected() ? new RealtimeRecognition() : new DomainRecognition()
-        this.delegate.lang = this.lang
-        this.delegate.continuous = this.continuous
-        this.delegate.interimResults = this.interimResults
-        this.delegate.maxAlternatives = this.maxAlternatives
-        this.delegate.onstart = this.onstart
-        this.delegate.onend = this.onend
-        this.delegate.onerror = this.onerror
-        this.delegate.onresult = this.onresult as ((event: RecognitionEvent) => void) | null
-        this.delegate.start()
+        const realtimeSelected = realtimeAsrSelected()
+        const delegate = realtimeSelected ? new RealtimeRecognition() : new DomainRecognition()
+        this.delegate = delegate
+        this.bindDelegate(delegate, realtimeSelected)
+        delegate.start()
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         queueMicrotask(() => {
@@ -291,6 +285,53 @@ function installDomainRecognitionPatch() {
 
     abort() {
       this.delegate?.abort()
+    }
+
+    private bindDelegate(delegate: NativeRecognition | RecognitionLike, realtimeDelegate: boolean) {
+      delegate.lang = this.lang
+      delegate.continuous = this.continuous
+      delegate.interimResults = this.interimResults
+      delegate.maxAlternatives = this.maxAlternatives
+      delegate.onstart = this.onstart
+      delegate.onresult = this.onresult as ((event: RecognitionEvent) => void) | null
+      delegate.onerror = (event) => {
+        if (
+          realtimeDelegate &&
+          !this.fallbackStarted &&
+          ['network', 'service-not-allowed', 'audio-capture'].includes(event.error) &&
+          NativeRecognitionClass
+        ) {
+          this.fallbackStarted = true
+          localStorage.setItem(ASR_PROVIDER_KEY, BROWSER_PROVIDER)
+          window.dispatchEvent(
+            new CustomEvent('woodfloor:asr-provider-fallback', {
+              detail: {
+                from: 'gpt-realtime-2',
+                to: BROWSER_PROVIDER,
+                reason: event.message ?? event.error,
+              },
+            }),
+          )
+          const browserDelegate = new DomainRecognition()
+          this.delegate = browserDelegate
+          this.bindDelegate(browserDelegate, false)
+          try {
+            browserDelegate.start()
+          } catch (fallbackError) {
+            this.onerror?.({
+              error: 'service-not-allowed',
+              message: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+            })
+            this.onend?.()
+          }
+          return
+        }
+        this.onerror?.(event)
+      }
+      delegate.onend = () => {
+        if (realtimeDelegate && this.fallbackStarted) return
+        this.onend?.()
+      }
     }
   }
 
