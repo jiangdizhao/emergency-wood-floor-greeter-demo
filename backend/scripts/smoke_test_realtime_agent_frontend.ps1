@@ -40,8 +40,8 @@ $runtimePatterns = @(
     "output_audio_buffer.stopped",
     "/api/interaction/route",
     "woodfloor_voice_output",
-    "GPT Realtime（默认）",
-    "Kokoro 本地语音",
+    "realtimeOption.value = REALTIME_OUTPUT",
+    "kokoroOption.value = KOKORO_OUTPUT",
     "error.name === 'AbortError'"
 )
 foreach ($pattern in $runtimePatterns) {
