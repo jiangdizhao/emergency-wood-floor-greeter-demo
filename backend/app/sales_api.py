@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from .interaction_api import router as interaction_router
 from .models import (
     LeadCaptureRequest,
     LeadConsentUpdateRequest,
@@ -17,6 +18,7 @@ from .services.sales_knowledge_service import SalesKnowledgeService
 
 router = APIRouter(tags=["sales-and-crm"])
 router.include_router(realtime_router)
+router.include_router(interaction_router)
 
 sales_lead_service = LeadService()
 crm_repository = CRMRepository()
