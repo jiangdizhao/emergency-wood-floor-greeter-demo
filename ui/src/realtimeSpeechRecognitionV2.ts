@@ -1,3 +1,5 @@
+import { getRealtimeAgentRuntime, type RealtimeAgentRuntime } from './realtimeAgentRuntime'
+
 export type RecognitionAlternative = { transcript: string; confidence?: number }
 
 export type RecognitionResult = {
@@ -29,30 +31,11 @@ export type RecognitionLike = {
   onresult: ((event: RecognitionEvent) => void) | null
 }
 
-type RealtimeAgentRuntime = {
-  prewarm: () => Promise<void>
-  beginCapture: () => Promise<void>
-  endCapture: () => Promise<string>
-  abortCapture: () => Promise<void>
-  stopOutput: () => Promise<void>
-  status: () => Record<string, unknown>
-}
-
-type RealtimeWindow = Window & {
-  __WOODFLOOR_REALTIME_AGENT__?: RealtimeAgentRuntime
-}
-
 const PROVIDER_STORAGE_KEY = 'woodfloor_asr_provider'
 const REALTIME_PROVIDER = 'gpt-realtime-2'
 
 function runtime(): RealtimeAgentRuntime {
-  const agent = (window as RealtimeWindow).__WOODFLOOR_REALTIME_AGENT__
-  if (!agent) {
-    throw new Error(
-      'GPT Realtime runtime is not loaded. Refresh the page after pulling the latest office branch.',
-    )
-  }
-  return agent
+  return getRealtimeAgentRuntime()
 }
 
 export function realtimeAsrSelected(): boolean {
@@ -168,8 +151,7 @@ export async function prewarmRealtimeRecognition(): Promise<void> {
 }
 
 export function resetRealtimeRecognition(): void {
-  const agent = (window as RealtimeWindow).__WOODFLOOR_REALTIME_AGENT__
-  if (!agent) return
+  const agent = runtime()
   void agent.abortCapture().catch(() => undefined)
   void agent.stopOutput().catch(() => undefined)
 }
