@@ -1,0 +1,42 @@
+name: Office Realtime Agent Check
+
+on:
+  push:
+    branches: [office]
+  workflow_dispatch:
+
+jobs:
+  static-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Compile changed backend modules
+        working-directory: backend
+        run: |
+          python -m py_compile \
+            app/services/turn_router.py \
+            app/interaction_api.py \
+            app/services/dialogue_policy.py
+
+      - name: Check routing policy
+        working-directory: backend
+        run: python scripts/smoke_test_realtime_agent_routing.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ui
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: ui
+        run: npm run build
