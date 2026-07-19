@@ -72,6 +72,12 @@ function kokoroSmalltalkFallback(text: string): string {
   return '我在听，您可以继续说。'
 }
 
+function progressCue(): string {
+  return selectedLanguage() === 'en'
+    ? 'Okay, I am checking the relevant information now.'
+    : '好的，我正在核对相关信息。'
+}
+
 const previousFetch = window.fetch.bind(window)
 const agent = getRealtimeAgentRuntime()
 let lastAnswer = ''
@@ -81,6 +87,19 @@ let listeningGeneration = 0
 window.addEventListener('woodfloor:realtime-listening-start', () => {
   listeningGeneration += 1
 })
+
+async function fetchRoute(path: 'classify' | 'route', body: Record<string, unknown>): Promise<RoutePayload> {
+  const response = await previousFetch(`${API_BASE_URL}/api/interaction/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '')
+    throw new Error(`Interaction ${path} failed: ${response.status} ${detail}`)
+  }
+  return (await response.json()) as RoutePayload
+}
 
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const url = requestUrl(input)
@@ -102,20 +121,26 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
   const startedAt = performance.now()
   const generationAtStart = listeningGeneration
   try {
-    const routeResponse = await previousFetch(`${API_BASE_URL}/api/interaction/route`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(body),
-    })
-    if (!routeResponse.ok) {
-      const detail = await routeResponse.text().catch(() => '')
-      throw new Error(`Interaction route failed: ${routeResponse.status} ${detail}`)
-    }
-
-    const payload = (await routeResponse.json()) as RoutePayload
+    let payload = await fetchRoute('classify', body)
+    const classifyMs = Math.round(performance.now() - startedAt)
     const route = payload.response_route ?? 'terra'
 
-    if (route === 'repeat_last') {
+    if (route === 'terra') {
+      // Begin guarded business work immediately. While it runs, Realtime gives a
+      // short progress cue so the visitor does not face several seconds of silence.
+      const executionPromise = fetchRoute('route', body)
+      if ((localStorage.getItem(VOICE_OUTPUT_KEY) ?? REALTIME_OUTPUT) === REALTIME_OUTPUT) {
+        try {
+          await agent.speakExact(progressCue())
+        } catch (error) {
+          const interrupted =
+            listeningGeneration !== generationAtStart ||
+            (error instanceof Error && error.name === 'AbortError')
+          if (!interrupted) console.warn('Realtime progress cue could not play:', error)
+        }
+      }
+      payload = await executionPromise
+    } else if (route === 'repeat_last') {
       payload.answer =
         lastAnswer ||
         (selectedLanguage() === 'en'
@@ -150,7 +175,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
       route,
       intent: payload.route_intent,
       reason: payload.route_reason,
-      latency_ms: Math.round(performance.now() - startedAt),
+      classify_ms: classifyMs,
+      total_ms: Math.round(performance.now() - startedAt),
     })
     return jsonResponse(payload)
   } catch (error) {
