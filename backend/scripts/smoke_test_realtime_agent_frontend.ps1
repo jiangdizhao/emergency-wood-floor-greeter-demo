@@ -67,7 +67,10 @@ foreach ($pattern in $recognitionPatterns) {
 }
 
 $routeGuardPatterns = @(
+    "/api/interaction/classify",
     "/api/interaction/route",
+    "const executionPromise = fetchRoute('route', body)",
+    "await agent.speakExact(progressCue())",
     "route === 'realtime_direct'",
     "error.name === 'AbortError'",
     "listeningGeneration !== generationAtStart",
@@ -113,8 +116,11 @@ foreach ($pattern in $routerPatterns) {
     }
 }
 
+if (-not $interactionApi.Contains('@router.post("/api/interaction/classify")')) {
+    throw "The fast interaction-classification endpoint is not registered."
+}
 if (-not $interactionApi.Contains('@router.post("/api/interaction/route")')) {
-    throw "The routed interaction endpoint is not registered."
+    throw "The routed interaction-execution endpoint is not registered."
 }
 
 $legacyPerTurnPattern = "new RTCPeerConnection"
@@ -126,4 +132,5 @@ Write-Host "Persistent GPT Realtime frontend and routing contracts passed." -For
 Write-Host "Model configured: $($status.model)"
 Write-Host "The physical microphone is push-to-talk only; the idle sender track is detached after negotiation."
 Write-Host "Interrupted Realtime social responses cannot silently fall through to Terra."
+Write-Host "Terra execution starts concurrently with a short Realtime progress cue."
 Write-Host "GPT Realtime is the default output; Kokoro remains user-selectable and a 60-second circuit breaker prevents repeated failed Realtime attempts."
