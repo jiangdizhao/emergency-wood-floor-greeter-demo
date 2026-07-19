@@ -1,3 +1,11 @@
+import {
+  RealtimeRecognition,
+  realtimeAsrSelected,
+  type RecognitionErrorEvent,
+  type RecognitionEvent,
+  type RecognitionLike,
+} from './realtimeSpeechRecognition'
+
 type NativeAlternative = {
   transcript: string
   confidence?: number
@@ -14,11 +22,6 @@ type NativeEvent = {
     length: number
     [index: number]: NativeResult
   }
-}
-
-type RecognitionErrorEvent = {
-  error: string
-  message?: string
 }
 
 type NativeRecognition = {
@@ -157,18 +160,14 @@ function installDomainRecognitionPatch() {
 
   if (speechWindow.__flooringSpeechPatchInstalled) return
   const Original = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition
-  if (!Original) return
-
-  // TypeScript does not preserve the null check above inside a nested class
-  // constructor because the value is captured by a closure. Copy it to a
-  // non-optional constructor variable before declaring the wrapper class.
-  const NativeRecognitionClass: NativeRecognitionConstructor = Original
+  const NativeRecognitionClass: NativeRecognitionConstructor | null = Original ?? null
 
   class DomainRecognition implements NativeRecognition {
     private readonly nativeRecognition: NativeRecognition
     private resultHandler: ((event: NativeEvent) => void) | null = null
 
     constructor() {
+      if (!NativeRecognitionClass) throw new Error('Browser SpeechRecognition is unavailable.')
       this.nativeRecognition = new NativeRecognitionClass()
       this.nativeRecognition.maxAlternatives = 3
       this.nativeRecognition.lang = selectedLanguage() === 'en' ? 'en-US' : 'zh-CN'
@@ -179,8 +178,6 @@ function installDomainRecognitionPatch() {
     }
 
     set lang(_value: string) {
-      // App.tsx historically set zh-CN directly. The one-click language selector
-      // is now authoritative, so prevent that legacy value from overriding English.
       this.nativeRecognition.lang = selectedLanguage() === 'en' ? 'en-US' : 'zh-CN'
     }
 
@@ -255,8 +252,50 @@ function installDomainRecognitionPatch() {
     }
   }
 
-  speechWindow.SpeechRecognition = DomainRecognition
-  speechWindow.webkitSpeechRecognition = DomainRecognition
+  class AdaptiveRecognition implements NativeRecognition {
+    lang = selectedLanguage() === 'en' ? 'en-US' : 'zh-CN'
+    continuous = true
+    interimResults = true
+    maxAlternatives = 1
+    onstart: (() => void) | null = null
+    onend: (() => void) | null = null
+    onerror: ((event: RecognitionErrorEvent) => void) | null = null
+    onresult: ((event: NativeEvent) => void) | null = null
+
+    private delegate: NativeRecognition | RecognitionLike | null = null
+
+    start() {
+      try {
+        this.delegate = realtimeAsrSelected() ? new RealtimeRecognition() : new DomainRecognition()
+        this.delegate.lang = this.lang
+        this.delegate.continuous = this.continuous
+        this.delegate.interimResults = this.interimResults
+        this.delegate.maxAlternatives = this.maxAlternatives
+        this.delegate.onstart = this.onstart
+        this.delegate.onend = this.onend
+        this.delegate.onerror = this.onerror
+        this.delegate.onresult = this.onresult as ((event: RecognitionEvent) => void) | null
+        this.delegate.start()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        queueMicrotask(() => {
+          this.onerror?.({ error: 'service-not-allowed', message })
+          this.onend?.()
+        })
+      }
+    }
+
+    stop() {
+      this.delegate?.stop()
+    }
+
+    abort() {
+      this.delegate?.abort()
+    }
+  }
+
+  speechWindow.SpeechRecognition = AdaptiveRecognition
+  speechWindow.webkitSpeechRecognition = AdaptiveRecognition
   speechWindow.__flooringSpeechPatchInstalled = true
 }
 
