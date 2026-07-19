@@ -104,11 +104,13 @@ export class RealtimeRecognition implements RecognitionLike {
     this.ended = false
     this.stopRequested = false
     const agent = runtime()
-    // Interrupt outside the runtime operation queue. This releases an active
-    // Realtime audio response before the microphone-start operation is enqueued.
+    // Interrupt outside the runtime operation queue. Then serialize any pending
+    // post-negotiation detach before beginCapture attaches the real microphone,
+    // preventing a late idle-detach from removing the new track.
     void agent
       .stopOutput()
       .catch(() => undefined)
+      .then(() => detachIdleInputTrack(agent))
       .then(() => agent.beginCapture())
       .then(() => {
         if (this.ended) return
