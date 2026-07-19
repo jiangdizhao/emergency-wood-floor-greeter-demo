@@ -31,11 +31,23 @@ export type RecognitionLike = {
   onresult: ((event: RecognitionEvent) => void) | null
 }
 
+type RuntimeInternals = RealtimeAgentRuntime & {
+  sender?: RTCRtpSender | null
+}
+
 const PROVIDER_STORAGE_KEY = 'woodfloor_asr_provider'
 const REALTIME_PROVIDER = 'gpt-realtime-2'
 
 function runtime(): RealtimeAgentRuntime {
   return getRealtimeAgentRuntime()
+}
+
+async function detachIdleInputTrack(agent: RealtimeAgentRuntime): Promise<void> {
+  // PersistentRealtimeAgent uses a normal TypeScript private property, which is a
+  // regular JS property after compilation. Detaching after the initial SDP keeps
+  // the negotiated audio transceiver reusable without continuously sending silence.
+  const sender = (agent as RuntimeInternals).sender
+  if (sender) await sender.replaceTrack(null)
 }
 
 export function realtimeAsrSelected(): boolean {
@@ -108,9 +120,11 @@ export class RealtimeRecognition implements RecognitionLike {
     this.stopRequested = true
     if (!this.started || this.ended) return
     this.started = false
-    void runtime()
+    const agent = runtime()
+    void agent
       .endCapture()
-      .then((rawTranscript) => {
+      .then(async (rawTranscript) => {
+        await detachIdleInputTrack(agent)
         const transcript = normalizeTranscript(rawTranscript)
         if (!transcript || transcript === '__UNCLEAR__') {
           this.onerror?.({
@@ -121,7 +135,8 @@ export class RealtimeRecognition implements RecognitionLike {
         }
         this.onresult?.(recognitionEvent(transcript))
       })
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
+        await detachIdleInputTrack(agent).catch(() => undefined)
         const message = error instanceof Error ? error.message : String(error)
         const noSpeech = /too short|没有收到|unintelligible|录音时间太短/i.test(message)
         this.onerror?.({ error: noSpeech ? 'no-speech' : 'network', message })
@@ -132,8 +147,11 @@ export class RealtimeRecognition implements RecognitionLike {
   abort(): void {
     if (this.ended) return
     this.started = false
-    void runtime()
+    const agent = runtime()
+    void agent
       .abortCapture()
+      .catch(() => undefined)
+      .then(() => detachIdleInputTrack(agent))
       .catch(() => undefined)
       .finally(() => this.emitEnd())
   }
@@ -152,12 +170,18 @@ export class RealtimeRecognition implements RecognitionLike {
 }
 
 export async function prewarmRealtimeRecognition(): Promise<void> {
-  await runtime().prewarm()
+  const agent = runtime()
+  await agent.prewarm()
+  await detachIdleInputTrack(agent)
 }
 
 export function resetRealtimeRecognition(): void {
   const agent = runtime()
-  void agent.abortCapture().catch(() => undefined)
+  void agent
+    .abortCapture()
+    .catch(() => undefined)
+    .then(() => detachIdleInputTrack(agent))
+    .catch(() => undefined)
   void agent.stopOutput().catch(() => undefined)
 }
 
