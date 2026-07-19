@@ -50,6 +50,12 @@ async function detachIdleInputTrack(agent: RealtimeAgentRuntime): Promise<void> 
   if (sender) await sender.replaceTrack(null)
 }
 
+window.addEventListener('woodfloor:realtime-connected', () => {
+  void detachIdleInputTrack(runtime()).catch((error) => {
+    console.warn('Could not detach the idle Realtime input track:', error)
+  })
+})
+
 export function realtimeAsrSelected(): boolean {
   const configured = localStorage.getItem(PROVIDER_STORAGE_KEY)
   if (!configured) {
