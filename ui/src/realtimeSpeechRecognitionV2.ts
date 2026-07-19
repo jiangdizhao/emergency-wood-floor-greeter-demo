@@ -85,8 +85,13 @@ export class RealtimeRecognition implements RecognitionLike {
     this.started = false
     this.ended = false
     this.stopRequested = false
-    void runtime()
-      .beginCapture()
+    const agent = runtime()
+    // Interrupt outside the runtime operation queue. This releases an active
+    // Realtime audio response before the microphone-start operation is enqueued.
+    void agent
+      .stopOutput()
+      .catch(() => undefined)
+      .then(() => agent.beginCapture())
       .then(() => {
         if (this.ended) return
         this.started = true
