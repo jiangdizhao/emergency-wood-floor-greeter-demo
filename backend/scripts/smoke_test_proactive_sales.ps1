@@ -6,6 +6,7 @@ $ErrorActionPreference = 'Stop'
 $BackendRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $RepoRoot = (Resolve-Path (Join-Path $BackendRoot '..')).Path
 $ProactiveScript = Join-Path $RepoRoot 'ui\public\proactive-sales.js'
+$ProactiveTtsPatch = Join-Path $RepoRoot 'ui\public\proactive-tts-auto-patch.js'
 $IndexHtml = Join-Path $RepoRoot 'ui\index.html'
 $TtsServer = Join-Path $RepoRoot 'local_tts\kokoro_tts_server.py'
 $TtsStart = Join-Path $RepoRoot 'local_tts\start_kokoro_tts.ps1'
@@ -22,6 +23,10 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 if ($LASTEXITCODE -ne 0) {
     throw "proactive-sales.js syntax check failed with exit code $LASTEXITCODE."
 }
+& node --check $ProactiveTtsPatch
+if ($LASTEXITCODE -ne 0) {
+    throw "proactive-tts-auto-patch.js syntax check failed with exit code $LASTEXITCODE."
+}
 
 & $PythonExe -m py_compile $TtsServer $SalesKnowledge
 if ($LASTEXITCODE -ne 0) {
@@ -29,6 +34,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $proactive = Get-Content -Raw -Encoding UTF8 $ProactiveScript
+$proactiveTtsPatchText = Get-Content -Raw -Encoding UTF8 $ProactiveTtsPatch
 $index = Get-Content -Raw -Encoding UTF8 $IndexHtml
 $tts = Get-Content -Raw -Encoding UTF8 $TtsServer
 $ttsStartText = Get-Content -Raw -Encoding UTF8 $TtsStart
@@ -76,11 +82,25 @@ foreach ($pattern in $forbiddenProactivePatterns) {
 $requiredBootstrapPatterns = @(
     "localStorage.removeItem('woodfloor_proactive_sales_enabled')",
     "window.__WOODFLOOR_PROACTIVE_BOOTSTRAP_VERSION__ = '2026-07-14.3'",
+    '/proactive-tts-auto-patch.js?v=20260719-1',
     '/proactive-sales.js?v=20260714-3'
 )
 foreach ($pattern in $requiredBootstrapPatterns) {
     if (-not $index.Contains($pattern)) {
         throw "Missing proactive recovery bootstrap: $pattern"
+    }
+}
+
+$requiredTtsFallbackPatterns = @(
+    "body.provider !== 'local'",
+    "dock.classList.contains('visible')",
+    "visibleText === body.text.trim()",
+    "provider: 'auto'",
+    'X-Woodfloor-TTS-Caller'
+)
+foreach ($pattern in $requiredTtsFallbackPatterns) {
+    if (-not $proactiveTtsPatchText.Contains($pattern)) {
+        throw "Missing scoped proactive TTS fallback contract: $pattern"
     }
 }
 
@@ -140,6 +160,7 @@ Write-Host 'Assistant-question response window: 45 seconds of continuous idle ti
 Write-Host 'Any processing, listening or speaking state cancels the countdown and restarts it only after the normal agent is idle.'
 Write-Host 'Proactive narration cannot force delivery through an active agent turn.'
 Write-Host 'A stale browser pause flag is cleared before proactive-sales.js loads, and the script URL is cache-busted.'
+Write-Host 'Proactive narration uses local Kokoro first and automatically falls back through the Backend TTS chain.'
 Write-Host 'Customer greeting describes store capabilities and products, not internal dialogue-design rules.'
 Write-Host 'Product, collection, promotion and optional contact stories: enabled.'
 Write-Host 'Mandarin soft prosody: enabled.'
