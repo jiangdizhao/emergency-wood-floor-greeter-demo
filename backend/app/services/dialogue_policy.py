@@ -81,16 +81,18 @@ class DialoguePolicy:
                 reason="one clear purchase driver is enough for a useful first product story",
             )
 
-        # After a recommendation exists, any newly confirmed project detail should
-        # refresh the story around the same products or a newly-ranked pair. This is
-        # more useful than replying with a database-style summary.
-        if profile.recommended_product_ids and (
-            validation.can_apply
-            or turn.intent in {"provide_or_modify_needs", "other"}
+        # Refresh recommendations only after a confirmed requirement change. The old
+        # implementation also treated every `other` turn as a reason to recommend
+        # again; that made requests such as “introduce yourself again” inherit the
+        # previous flooring story and produce an obviously irrelevant answer.
+        if (
+            profile.recommended_product_ids
+            and validation.can_apply
+            and turn.intent == "provide_or_modify_needs"
         ):
             return DialogueDecision(
                 action="recommend_now",
-                reason="refresh product value after new context without starting another questionnaire",
+                reason="refresh product value after an explicitly validated requirement change",
             )
 
         if validation.needs_clarification:
@@ -101,6 +103,15 @@ class DialoguePolicy:
                 question=validation.clarification_question
                 or self._question_for_slot(context.pending_slot)
                 or "我已经记录了听清的部分。请再确认一下刚才没有听清的条件。",
+            )
+
+        # Unknown/non-business turns must not mutate state or trigger another product
+        # recommendation. The front-door TurnRouter handles common social intents; if
+        # an unknown turn still reaches this policy, acknowledge it conservatively.
+        if turn.intent == "other":
+            return DialogueDecision(
+                action="acknowledge",
+                reason="unknown turn is non-mutating and must not force a recommendation",
             )
 
         # Only the primary purchase driver is mandatory. All other fields are
