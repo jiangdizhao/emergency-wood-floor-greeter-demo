@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import './voice.css'
 import './speechRecognitionDomainPatch'
+import './asrModeControl'
 import App from './App.tsx'
 
 createRoot(document.getElementById('root')!).render(
