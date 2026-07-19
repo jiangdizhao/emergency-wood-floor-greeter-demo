@@ -181,6 +181,7 @@ class RealtimeWebRtcClient {
   private dataChannel: RTCDataChannel | null = null
   private mediaStream: MediaStream | null = null
   private microphoneTrack: MediaStreamTrack | null = null
+  private audioSender: RTCRtpSender | null = null
   private connectPromise: Promise<void> | null = null
   private activeSink: RealtimeRecognitionSink | null = null
   private captureStartedAt = 0
@@ -190,7 +191,7 @@ class RealtimeWebRtcClient {
 
   async beginTurn(sink: RealtimeRecognitionSink): Promise<void> {
     await this.ensureConnected()
-    if (!this.dataChannel || this.dataChannel.readyState !== 'open' || !this.microphoneTrack) {
+    if (!this.dataChannel || this.dataChannel.readyState !== 'open' || !this.audioSender) {
       throw new Error('GPT Realtime connection is not ready.')
     }
 
@@ -200,21 +201,30 @@ class RealtimeWebRtcClient {
     this.captureStartedAt = performance.now()
     if (this.responseInProgress) this.send({ type: 'response.cancel' })
     this.send({ type: 'input_audio_buffer.clear' })
-    this.microphoneTrack.enabled = true
+    await this.openMicrophone()
+    if (this.activeSink !== sink) {
+      await this.closeMicrophone()
+      return
+    }
     sink.onStarted()
   }
 
-  endTurn(sink: RealtimeRecognitionSink): void {
+  async endTurn(sink: RealtimeRecognitionSink): Promise<void> {
     if (this.activeSink !== sink) return
-    if (this.microphoneTrack) this.microphoneTrack.enabled = false
 
     const durationMs = performance.now() - this.captureStartedAt
     if (durationMs < MIN_CAPTURE_MS) {
+      await this.closeMicrophone()
       this.activeSink = null
       sink.onUnclear('录音时间太短，请按住按钮并完整说完。')
       sink.onEnded()
       return
     }
+
+    // Preserve the final phoneme before detaching the hardware microphone.
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 80))
+    await this.closeMicrophone()
+    if (this.activeSink !== sink) return
 
     this.send({ type: 'input_audio_buffer.commit' })
     this.responseInProgress = true
@@ -242,7 +252,7 @@ class RealtimeWebRtcClient {
 
   abortTurn(sink: RealtimeRecognitionSink): void {
     if (this.activeSink !== sink) return
-    if (this.microphoneTrack) this.microphoneTrack.enabled = false
+    void this.closeMicrophone()
     if (this.responseInProgress) this.send({ type: 'response.cancel' })
     this.responseInProgress = false
     this.send({ type: 'input_audio_buffer.clear' })
@@ -265,6 +275,7 @@ class RealtimeWebRtcClient {
     this.dataChannel = null
     this.mediaStream = null
     this.microphoneTrack = null
+    this.audioSender = null
     this.connectPromise = null
     this.responseInProgress = false
     const sink = this.activeSink
@@ -311,23 +322,8 @@ class RealtimeWebRtcClient {
       }
     })
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-      },
-    })
-    const track = stream.getAudioTracks()[0]
-    if (!track) {
-      for (const mediaTrack of stream.getTracks()) mediaTrack.stop()
-      throw new Error('No microphone audio track is available.')
-    }
-    track.enabled = false
-    this.mediaStream = stream
-    this.microphoneTrack = track
-    pc.addTrack(track, stream)
+    const audioTransceiver = pc.addTransceiver('audio', { direction: 'sendonly' })
+    this.audioSender = audioTransceiver.sender
 
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
@@ -362,6 +358,41 @@ class RealtimeWebRtcClient {
         },
       },
     })
+  }
+
+  private async openMicrophone(): Promise<void> {
+    if (!this.audioSender) throw new Error('Realtime audio sender is unavailable.')
+    await this.closeMicrophone()
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+      },
+    })
+    const track = stream.getAudioTracks()[0]
+    if (!track) {
+      for (const mediaTrack of stream.getTracks()) mediaTrack.stop()
+      throw new Error('No microphone audio track is available.')
+    }
+    this.mediaStream = stream
+    this.microphoneTrack = track
+    await this.audioSender.replaceTrack(track)
+  }
+
+  private async closeMicrophone(): Promise<void> {
+    const sender = this.audioSender
+    const stream = this.mediaStream
+    const track = this.microphoneTrack
+    this.mediaStream = null
+    this.microphoneTrack = null
+    try {
+      if (sender) await sender.replaceTrack(null)
+    } finally {
+      track?.stop()
+      for (const mediaTrack of stream?.getTracks() ?? []) mediaTrack.stop()
+    }
   }
 
   private waitForDataChannel(channel: RTCDataChannel): Promise<void> {
@@ -468,6 +499,7 @@ class RealtimeWebRtcClient {
     this.dataChannel = null
     this.mediaStream = null
     this.microphoneTrack = null
+    this.audioSender = null
   }
 }
 
@@ -493,7 +525,7 @@ export class RealtimeRecognition implements RecognitionLike {
       requestId,
       onStarted: () => {
         this.onstart?.()
-        if (this.stopRequested) realtimeClient.endTurn(this.sink)
+        if (this.stopRequested) void realtimeClient.endTurn(this.sink)
       },
       onTranscript: (text) => this.onresult?.(makeRecognitionEvent(text)),
       onUnclear: (message) => this.onerror?.({ error: 'no-speech', message }),
@@ -514,7 +546,11 @@ export class RealtimeRecognition implements RecognitionLike {
 
   stop(): void {
     this.stopRequested = true
-    realtimeClient.endTurn(this.sink)
+    void realtimeClient.endTurn(this.sink).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      this.onerror?.({ error: 'network', message })
+      this.emitEnd()
+    })
   }
 
   abort(): void {
