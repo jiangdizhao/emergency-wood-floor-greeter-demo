@@ -67,8 +67,8 @@ foreach ($pattern in $recognitionPatterns) {
 }
 
 $routeGuardPatterns = @(
-    "/api/interaction/classify",
-    "/api/interaction/route",
+    '/api/interaction/${path}',
+    "fetchRoute('classify', body)",
     "const executionPromise = fetchRoute('route', body)",
     "await agent.speakExact(progressCue())",
     "route === 'realtime_direct'",
