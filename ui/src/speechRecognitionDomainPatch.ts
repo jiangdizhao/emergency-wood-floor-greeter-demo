@@ -262,6 +262,7 @@ function installDomainRecognitionPatch() {
 
     private delegate: NativeRecognition | RecognitionLike | null = null
     private fallbackStarted = false
+    private realtimeStarted = false
 
     start() {
       try {
@@ -292,41 +293,57 @@ function installDomainRecognitionPatch() {
       delegate.continuous = this.continuous
       delegate.interimResults = this.interimResults
       delegate.maxAlternatives = this.maxAlternatives
-      delegate.onstart = this.onstart
+      delegate.onstart = () => {
+        if (realtimeDelegate) this.realtimeStarted = true
+        this.onstart?.()
+      }
       delegate.onresult = this.onresult as ((event: RecognitionEvent) => void) | null
       delegate.onerror = (event) => {
-        if (
+        const canFallback =
           realtimeDelegate &&
           !this.fallbackStarted &&
           ['network', 'service-not-allowed', 'audio-capture'].includes(event.error) &&
           NativeRecognitionClass
-        ) {
-          this.fallbackStarted = true
-          localStorage.setItem(ASR_PROVIDER_KEY, BROWSER_PROVIDER)
-          window.dispatchEvent(
-            new CustomEvent('woodfloor:asr-provider-fallback', {
-              detail: {
-                from: 'gpt-realtime-2',
-                to: BROWSER_PROVIDER,
-                reason: event.message ?? event.error,
-              },
-            }),
-          )
-          const browserDelegate = new DomainRecognition()
-          this.delegate = browserDelegate
-          this.bindDelegate(browserDelegate, false)
-          try {
-            browserDelegate.start()
-          } catch (fallbackError) {
-            this.onerror?.({
-              error: 'service-not-allowed',
-              message: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
-            })
-            this.onend?.()
-          }
+
+        if (!canFallback) {
+          this.onerror?.(event)
           return
         }
-        this.onerror?.(event)
+
+        localStorage.setItem(ASR_PROVIDER_KEY, BROWSER_PROVIDER)
+        window.dispatchEvent(
+          new CustomEvent('woodfloor:asr-provider-fallback', {
+            detail: {
+              from: 'gpt-realtime-2',
+              to: BROWSER_PROVIDER,
+              reason: event.message ?? event.error,
+              deferred: this.realtimeStarted,
+            },
+          }),
+        )
+
+        // Before onstart there is no user audio to preserve, so Browser ASR can
+        // take over immediately. After an active turn has already started, opening
+        // Browser ASR after the user pressed Stop would be surprising and could
+        // record a new unintended turn. In that case switch the next turn only.
+        if (this.realtimeStarted) {
+          this.onerror?.(event)
+          return
+        }
+
+        this.fallbackStarted = true
+        const browserDelegate = new DomainRecognition()
+        this.delegate = browserDelegate
+        this.bindDelegate(browserDelegate, false)
+        try {
+          browserDelegate.start()
+        } catch (fallbackError) {
+          this.onerror?.({
+            error: 'service-not-allowed',
+            message: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+          })
+          this.onend?.()
+        }
       }
       delegate.onend = () => {
         if (realtimeDelegate && this.fallbackStarted) return
