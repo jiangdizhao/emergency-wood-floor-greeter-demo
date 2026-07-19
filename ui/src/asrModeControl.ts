@@ -204,18 +204,7 @@ function createControl(): HTMLElement {
       }
     })
 
-  const updateDisabledState = () => {
-    select.disabled = isListening()
-  }
-  updateDisabledState()
-  const listeningObserver = new MutationObserver(updateDisabledState)
-  listeningObserver.observe(document.body, {
-    subtree: true,
-    attributes: true,
-    attributeFilter: ['class'],
-  })
-  control.addEventListener('DOMNodeRemoved', () => listeningObserver.disconnect(), { once: true })
-
+  select.disabled = isListening()
   return control
 }
 
@@ -226,7 +215,12 @@ function syncControl(): void {
     if (existing) removeControl()
     return
   }
-  if (!existing) document.body.appendChild(createControl())
+  if (!existing) {
+    document.body.appendChild(createControl())
+    return
+  }
+  const select = existing.querySelector<HTMLSelectElement>('select')
+  if (select) select.disabled = isListening()
 }
 
 function installAsrModeControl(): void {
@@ -236,6 +230,8 @@ function installAsrModeControl(): void {
   observer.observe(document.getElementById('root') ?? document.body, {
     childList: true,
     subtree: true,
+    attributes: true,
+    attributeFilter: ['class'],
   })
 }
 
