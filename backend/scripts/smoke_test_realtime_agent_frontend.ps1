@@ -7,6 +7,7 @@ $BackendRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $RepoRoot = (Resolve-Path (Join-Path $BackendRoot '..')).Path
 $RuntimeSource = Join-Path $RepoRoot 'ui\src\realtimeAgentRuntime.ts'
 $RecognitionSource = Join-Path $RepoRoot 'ui\src\realtimeSpeechRecognitionV2.ts'
+$RouteGuardSource = Join-Path $RepoRoot 'ui\src\routedInteractionGuard.ts'
 $CircuitSource = Join-Path $RepoRoot 'ui\src\realtimeOutputCircuitBreaker.ts'
 $MainSource = Join-Path $RepoRoot 'ui\src\main.tsx'
 $RouterSource = Join-Path $BackendRoot 'app\services\turn_router.py'
@@ -21,6 +22,7 @@ if ($status.turn_mode -ne "push_to_talk") { throw "Expected push_to_talk mode." 
 
 $runtime = Get-Content -Raw -Encoding UTF8 $RuntimeSource
 $recognition = Get-Content -Raw -Encoding UTF8 $RecognitionSource
+$routeGuard = Get-Content -Raw -Encoding UTF8 $RouteGuardSource
 $circuit = Get-Content -Raw -Encoding UTF8 $CircuitSource
 $main = Get-Content -Raw -Encoding UTF8 $MainSource
 $router = Get-Content -Raw -Encoding UTF8 $RouterSource
@@ -51,6 +53,7 @@ foreach ($pattern in $runtimePatterns) {
 $recognitionPatterns = @(
     "getRealtimeAgentRuntime",
     ".stopOutput()",
+    ".then(() => detachIdleInputTrack(agent))",
     ".then(() => agent.beginCapture())",
     ".endCapture()",
     "sender.replaceTrack(null)",
@@ -60,6 +63,21 @@ $recognitionPatterns = @(
 foreach ($pattern in $recognitionPatterns) {
     if (-not $recognition.Contains($pattern)) {
         throw "Missing Realtime recognition contract: $pattern"
+    }
+}
+
+$routeGuardPatterns = @(
+    "/api/interaction/route",
+    "route === 'realtime_direct'",
+    "error.name === 'AbortError'",
+    "listeningGeneration !== generationAtStart",
+    "skipNextTtsText",
+    "kokoroSmalltalkFallback",
+    "Authoritative interaction route failed"
+)
+foreach ($pattern in $routeGuardPatterns) {
+    if (-not $routeGuard.Contains($pattern)) {
+        throw "Missing interruption-safe route guard contract: $pattern"
     }
 }
 
@@ -73,6 +91,9 @@ foreach ($pattern in $circuitPatterns) {
     if (-not $circuit.Contains($pattern)) {
         throw "Missing Realtime output circuit-breaker contract: $pattern"
     }
+}
+if (-not $main.Contains("import './routedInteractionGuard'")) {
+    throw "The authoritative routed interaction guard is not loaded."
 }
 if (-not $main.Contains("import './realtimeOutputCircuitBreaker'")) {
     throw "The Realtime output circuit breaker is not loaded after the runtime."
@@ -104,4 +125,5 @@ if ($recognition.Contains($legacyPerTurnPattern)) {
 Write-Host "Persistent GPT Realtime frontend and routing contracts passed." -ForegroundColor Green
 Write-Host "Model configured: $($status.model)"
 Write-Host "The physical microphone is push-to-talk only; the idle sender track is detached after negotiation."
+Write-Host "Interrupted Realtime social responses cannot silently fall through to Terra."
 Write-Host "GPT Realtime is the default output; Kokoro remains user-selectable and a 60-second circuit breaker prevents repeated failed Realtime attempts."
