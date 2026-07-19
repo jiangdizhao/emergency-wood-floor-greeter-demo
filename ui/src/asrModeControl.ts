@@ -129,11 +129,11 @@ function createControl(): HTMLElement {
 
   const browserOption = document.createElement('option')
   browserOption.value = BROWSER_PROVIDER
-  browserOption.textContent = '浏览器识别（原方法）'
+  browserOption.textContent = '浏览器识别（兼容模式）'
 
   const realtimeOption = document.createElement('option')
   realtimeOption.value = REALTIME_PROVIDER
-  realtimeOption.textContent = 'GPT Realtime 2.1（上下文纠错）'
+  realtimeOption.textContent = 'GPT Realtime 2.1（默认）'
   realtimeOption.disabled = true
 
   select.append(browserOption, realtimeOption)
@@ -155,14 +155,14 @@ function createControl(): HTMLElement {
         })
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : String(error)
-          state.textContent = '连接失败，已切回原方法'
+          state.textContent = '连接失败，已切回兼容模式'
           control.dataset.error = 'true'
           console.warn('GPT Realtime prewarm failed:', message)
           setProvider(BROWSER_PROVIDER)
           select.value = BROWSER_PROVIDER
         })
     } else {
-      state.textContent = '使用原浏览器识别'
+      state.textContent = '使用浏览器兼容识别'
       control.dataset.error = 'false'
     }
   })
@@ -174,7 +174,7 @@ function createControl(): HTMLElement {
       const configured = Boolean(status.configured && status.enabled)
       realtimeOption.disabled = !configured
       realtimeOption.textContent = configured
-        ? `GPT Realtime ${status.model ?? '2.1'}（上下文纠错）`
+        ? `GPT Realtime ${status.model ?? '2.1'}（默认）`
         : 'GPT Realtime（Backend 未配置）'
 
       if (!configured && select.value === REALTIME_PROVIDER) {
@@ -223,9 +223,21 @@ function syncControl(): void {
   if (select) select.disabled = isListening()
 }
 
+function showAutomaticFallback(event: Event): void {
+  const detail = (event as CustomEvent<{ reason?: string }>).detail
+  const control = document.getElementById(CONTROL_ID)
+  const select = control?.querySelector<HTMLSelectElement>('select')
+  const state = control?.querySelector<HTMLElement>('.asr-mode-state')
+  if (select) select.value = BROWSER_PROVIDER
+  if (state) state.textContent = 'Realtime 故障，已切换浏览器识别'
+  if (control) control.dataset.error = 'true'
+  console.warn('GPT Realtime input failed; Browser ASR is now active:', detail?.reason ?? 'unknown error')
+}
+
 function installAsrModeControl(): void {
   installStyle()
   syncControl()
+  window.addEventListener('woodfloor:asr-provider-fallback', showAutomaticFallback)
   const observer = new MutationObserver(syncControl)
   observer.observe(document.getElementById('root') ?? document.body, {
     childList: true,
