@@ -11,7 +11,7 @@ This document describes the `office` branch voice architecture introduced on 202
 - Simple social interaction: handled directly or by a fixed persona response.
 - Product facts, recommendations, comparisons, promotions, mutable customer requirements and reasoning: delegated to the existing guarded Terra/Qwen dialogue pipeline.
 - Audio output: GPT Realtime remote audio.
-- One browser visitor reuses one WebRTC session. A silent WebAudio track remains in the negotiated SDP while the physical microphone is closed.
+- One browser visitor reuses one WebRTC session. A silent WebAudio track is used only to negotiate the initial audio transceiver, then the sender is detached while idle so silence is not continuously uploaded.
 
 ### User-selected Kokoro voice
 
@@ -24,7 +24,8 @@ Selecting **Kokoro local voice** changes only the output engine:
 ### Failure fallback
 
 - Realtime audio-output failure: use the existing local Kokoro -> Backend auto -> browser speech chain.
-- Realtime input/session failure: the legacy Browser SpeechRecognition option remains available in the ASR selector.
+- Realtime input/session failure before listening starts: Browser SpeechRecognition may take over immediately.
+- Realtime input/session failure after an active turn has started: the failed turn ends visibly and Browser SpeechRecognition is selected for the next turn; the browser must not unexpectedly begin a new recording after the user already pressed Stop.
 - Terra and Qwen remain explicit session-level modes; there is no hidden Terra-to-Qwen or Qwen-to-Terra fallback.
 
 ## Authoritative routing
@@ -45,15 +46,15 @@ An `other` intent must never trigger a product recommendation merely because the
 
 ## Persistent push-to-talk session
 
-1. Page startup creates one WebRTC session with a valid silent audio track.
-2. The physical microphone is closed by default.
-3. Pressing the talk button interrupts current Realtime output, opens the microphone and replaces the silent track.
+1. Page startup creates one WebRTC session with a valid silent audio track in the initial SDP.
+2. After negotiation, the sender track is detached and the physical microphone remains closed.
+3. Pressing the talk button interrupts current Realtime output, opens the microphone and attaches the real microphone track.
 4. The runtime waits briefly for RTP stability, then clears the input buffer.
 5. Releasing the button commits the buffer and waits for `input_audio_buffer.committed`.
-6. The physical microphone is stopped and the silent track is restored.
+6. The physical microphone is stopped and the sender track is detached again.
 7. The same Realtime session is reused for the next turn.
 
-This removes per-turn SDP/session setup while preserving the exhibition requirement that the microphone is active only during push-to-talk.
+This removes per-turn SDP/session setup while preserving the exhibition requirement that the microphone is active only during push-to-talk and avoiding continuous idle-audio upload.
 
 ## Local validation
 
@@ -61,8 +62,10 @@ From the repository root:
 
 ```powershell
 cd .\backend
+$env:PYTHONPATH = '.'
 python .\scripts\smoke_test_realtime_agent_routing.py
 powershell -ExecutionPolicy Bypass -File .\scripts\smoke_test_realtime_asr.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke_test_realtime_agent_frontend.ps1
 ```
 
 Frontend:
