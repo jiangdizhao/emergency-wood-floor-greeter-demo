@@ -30,7 +30,12 @@ Selecting **Kokoro local voice** changes only the output engine:
 
 ## Authoritative routing
 
-`POST /api/interaction/route` is the authoritative turn guard.
+`POST /api/interaction/classify` returns the authoritative route without waiting for Terra.
+
+- Direct routes return a complete ChatResponse-shaped payload immediately.
+- A Terra route returns only route metadata, allowing guarded Terra execution to start concurrently with a short Realtime progress cue.
+
+`POST /api/interaction/route` performs the guarded business execution when Terra/Qwen is required.
 
 - `deterministic_direct`: identity, capabilities, greeting, thanks and interaction help.
 - `realtime_direct`: safe smalltalk with no product facts and no customer-state mutation.
@@ -55,6 +60,12 @@ An `other` intent must never trigger a product recommendation merely because the
 7. The same Realtime session is reused for the next turn.
 
 This removes per-turn SDP/session setup while preserving the exhibition requirement that the microphone is active only during push-to-talk and avoiding continuous idle-audio upload.
+
+## Complex-turn latency behavior
+
+For a Terra-routed turn, the frontend starts the guarded Terra request immediately. At the same time, the existing Realtime session says a short fixed cue such as `好的，我正在核对相关信息。`. The cue does not contain a result and is not added to the customer profile. When Terra finishes, its validated answer is spoken by Realtime.
+
+This improves perceived latency without allowing Realtime to invent product facts while Terra is working.
 
 ## Local validation
 
@@ -86,6 +97,7 @@ Expected acceptance tests:
    - Short natural response, no product facts.
 3. Say `我改成浅灰色`.
    - Route log: `terra`.
+   - A short progress cue plays while Terra runs.
    - The guarded pipeline updates the confirmed requirement and may refresh recommendations.
 4. Say `我喜欢钱会色，不，浅灰色，深浅的浅，灰色的灰`.
    - Final normalized transcript should be `我喜欢浅灰色` or equivalent.
