@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict
 
-from .models import ChatRequest, DialogueProvider
+from .models import ChatRequest, DialogueProvider, SessionState
 from .services.turn_router import TurnRouter
 
 logger = logging.getLogger(__name__)
@@ -104,6 +104,8 @@ def route_interaction(request: InteractionRequest) -> dict[str, Any]:
             assistant_text=response.answer,
             profile=response.customer_profile,
         )
+        if response.state == SessionState.SESSION_END:
+            customer_memory_service.finish_session(response.customer_profile)
     except Exception:
         # Memory persistence must never break the customer-facing route.
         pass
