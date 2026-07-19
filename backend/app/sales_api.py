@@ -8,6 +8,7 @@ from .models import (
     LeadDeleteRequest,
     LeadFollowUpUpdateRequest,
 )
+from .realtime_api import router as realtime_router
 from .services.crm_repository import CRMRepository
 from .services.crm_service import CRMService
 from .services.lead_service import LeadService
@@ -15,6 +16,7 @@ from .services.promotion_service import PromotionService
 from .services.sales_knowledge_service import SalesKnowledgeService
 
 router = APIRouter(tags=["sales-and-crm"])
+router.include_router(realtime_router)
 
 sales_lead_service = LeadService()
 crm_repository = CRMRepository()
