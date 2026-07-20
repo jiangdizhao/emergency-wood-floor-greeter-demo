@@ -16,7 +16,7 @@ function writeAscii(view: DataView, offset: number, value: string): void {
   }
 }
 
-function createPlayableSilenceWav(): Uint8Array {
+function createPlayableSilenceWav(): ArrayBuffer {
   const sampleCount = Math.max(1, Math.round((SAMPLE_RATE * ACK_DURATION_MS) / 1000))
   const bytesPerSample = BITS_PER_SAMPLE / 8
   const dataSize = sampleCount * CHANNELS * bytesPerSample
@@ -37,7 +37,7 @@ function createPlayableSilenceWav(): Uint8Array {
   writeAscii(view, 36, 'data')
   view.setUint32(40, dataSize, true)
 
-  return new Uint8Array(buffer)
+  return buffer
 }
 
 function playableRealtimeAck(original: Response): Response {
