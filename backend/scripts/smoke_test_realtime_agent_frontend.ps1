@@ -8,13 +8,17 @@ $RepoRoot = (Resolve-Path (Join-Path $BackendRoot '..')).Path
 $RuntimeSource = Join-Path $RepoRoot 'ui\src\realtimeAgentRuntime.ts'
 $RecognitionSource = Join-Path $RepoRoot 'ui\src\realtimeSpeechRecognitionV2.ts'
 $RouteGuardSource = Join-Path $RepoRoot 'ui\src\routedInteractionGuard.ts'
-$CircuitSource = Join-Path $RepoRoot 'ui\src\realtimeOutputCircuitBreaker.ts'
-$PlaybackAckSource = Join-Path $RepoRoot 'ui\src\realtimePlaybackAck.ts'
+$VoiceManagerSource = Join-Path $RepoRoot 'ui\src\voiceOutputManager.ts'
 $MainSource = Join-Path $RepoRoot 'ui\src\main.tsx'
+$IndexSource = Join-Path $RepoRoot 'ui\index.html'
 $RouterSource = Join-Path $BackendRoot 'app\services\turn_router.py'
 $InteractionApiSource = Join-Path $BackendRoot 'app\interaction_api.py'
+$RemovedCircuitSource = Join-Path $RepoRoot 'ui\src\realtimeOutputCircuitBreaker.ts'
+$RemovedAckSource = Join-Path $RepoRoot 'ui\src\realtimePlaybackAck.ts'
+$RemovedProactivePatch = Join-Path $RepoRoot 'ui\public\proactive-tts-auto-patch.js'
+$RemovedProactiveRuntime = Join-Path $RepoRoot 'ui\public\proactive-sales.js'
 
-Write-Host "Checking persistent GPT Realtime agent contracts..." -ForegroundColor Cyan
+Write-Host "Checking strict office voice-output contracts..." -ForegroundColor Cyan
 
 $status = Invoke-RestMethod -Uri "$BaseUrl/api/realtime/status" -Method Get
 if (-not $status.ok) { throw "Realtime status endpoint did not return ok=true." }
@@ -24,9 +28,9 @@ if ($status.turn_mode -ne "push_to_talk") { throw "Expected push_to_talk mode." 
 $runtime = Get-Content -Raw -Encoding UTF8 $RuntimeSource
 $recognition = Get-Content -Raw -Encoding UTF8 $RecognitionSource
 $routeGuard = Get-Content -Raw -Encoding UTF8 $RouteGuardSource
-$circuit = Get-Content -Raw -Encoding UTF8 $CircuitSource
-$playbackAck = Get-Content -Raw -Encoding UTF8 $PlaybackAckSource
+$voiceManager = Get-Content -Raw -Encoding UTF8 $VoiceManagerSource
 $main = Get-Content -Raw -Encoding UTF8 $MainSource
+$index = Get-Content -Raw -Encoding UTF8 $IndexSource
 $router = Get-Content -Raw -Encoding UTF8 $RouterSource
 $interactionApi = Get-Content -Raw -Encoding UTF8 $InteractionApiSource
 
@@ -39,12 +43,7 @@ $runtimePatterns = @(
     "restoreSilentTrack",
     "response.output_audio_transcript.delta",
     "output_audio_buffer.started",
-    "output_audio_buffer.stopped",
-    "/api/interaction/route",
-    "woodfloor_voice_output",
-    "realtimeOption.value = REALTIME_OUTPUT",
-    "kokoroOption.value = KOKORO_OUTPUT",
-    "error.name === 'AbortError'"
+    "output_audio_buffer.stopped"
 )
 foreach ($pattern in $runtimePatterns) {
     if (-not $runtime.Contains($pattern)) {
@@ -58,9 +57,7 @@ $recognitionPatterns = @(
     ".then(() => detachIdleInputTrack(agent))",
     ".then(() => agent.beginCapture())",
     ".endCapture()",
-    "sender.replaceTrack(null)",
-    "window.addEventListener('woodfloor:realtime-connected'",
-    "localStorage.setItem(PROVIDER_STORAGE_KEY, REALTIME_PROVIDER)"
+    "sender.replaceTrack(null)"
 )
 foreach ($pattern in $recognitionPatterns) {
     if (-not $recognition.Contains($pattern)) {
@@ -71,58 +68,80 @@ foreach ($pattern in $recognitionPatterns) {
 $routeGuardPatterns = @(
     '/api/interaction/${path}',
     "fetchRoute('classify', body)",
-    "const executionPromise = fetchRoute('route', body)",
-    "await agent.speakExact(progressCue())",
-    "route === 'realtime_direct'",
-    "error.name === 'AbortError'",
-    "listeningGeneration !== generationAtStart",
-    "skipNextTtsText",
-    "kokoroSmalltalkFallback",
-    "Authoritative interaction route failed"
+    "payload = await fetchRoute('route', body)",
+    "getVoiceOutputMode() === 'realtime'",
+    "respondDirectText",
+    "realtime_direct_text",
+    "audio_already_played",
+    "woodfloor:voice-output-played",
+    "woodfloor:voice-output-stop",
+    "No spoken progress cue"
 )
 foreach ($pattern in $routeGuardPatterns) {
     if (-not $routeGuard.Contains($pattern)) {
-        throw "Missing interruption-safe route guard contract: $pattern"
+        throw "Missing strict routed-interaction contract: $pattern"
     }
 }
 
-$circuitPatterns = @(
-    "CIRCUIT_DURATION_MS = 60_000",
-    "woodfloor_realtime_output_disabled_until",
-    "provider !== 'gpt-realtime'",
-    "woodfloor:realtime-output-fallback"
+$forbiddenRouteGuardPatterns = @(
+    "progressCue()",
+    "skipNextTtsText",
+    "kokoroSmalltalkFallback",
+    "silentWavResponse"
 )
-foreach ($pattern in $circuitPatterns) {
-    if (-not $circuit.Contains($pattern)) {
-        throw "Missing Realtime output circuit-breaker contract: $pattern"
+foreach ($pattern in $forbiddenRouteGuardPatterns) {
+    if ($routeGuard.Contains($pattern)) {
+        throw "Obsolete multi-owner voice behavior remains in route guard: $pattern"
     }
 }
 
-$playbackAckPatterns = @(
-    "ACK_DURATION_MS = 80",
-    "createPlayableSilenceWav",
-    "view.setUint32(40, dataSize, true)",
-    "X-Woodfloor-Audio-Already-Played",
-    "provider === REALTIME_PROVIDER",
-    "return playableRealtimeAck(response)"
+$voiceManagerPatterns = @(
+    "export type VoiceOutputMode = 'realtime' | 'kokoro' | 'openai'",
+    "provider = mode === KOKORO_MODE ? 'local' : 'openai'",
+    "X-Woodfloor-Strict-Voice-Mode",
+    "DUPLICATE_SUPPRESSION_MS",
+    "installSingleMediaOwner",
+    "disableBrowserSpeechFallback",
+    "Automatic voice fallback is disabled",
+    "window.dispatchEvent(new CustomEvent('woodfloor:voice-output-changed'",
+    "return acknowledgementResponse('gpt-realtime', message)",
+    "return acknowledgementResponse(mode === KOKORO_MODE ? 'local-kokoro' : 'openai', message)"
 )
-foreach ($pattern in $playbackAckPatterns) {
-    if (-not $playbackAck.Contains($pattern)) {
-        throw "Missing single-playback Realtime acknowledgement contract: $pattern"
+foreach ($pattern in $voiceManagerPatterns) {
+    if (-not $voiceManager.Contains($pattern)) {
+        throw "Missing strict single-owner voice contract: $pattern"
     }
 }
 
-if (-not $main.Contains("import './routedInteractionGuard'")) {
-    throw "The authoritative routed interaction guard is not loaded."
+if (-not $main.Contains("import './voiceOutputManager'")) {
+    throw "The strict voice output manager is not loaded."
 }
-if (-not $main.Contains("import './realtimeOutputCircuitBreaker'")) {
-    throw "The Realtime output circuit breaker is not loaded after the runtime."
+if ($main.Contains("realtimeOutputCircuitBreaker") -or $main.Contains("realtimePlaybackAck")) {
+    throw "Obsolete automatic fallback modules are still imported."
 }
-if (-not $main.Contains("import './realtimePlaybackAck'")) {
-    throw "The Realtime playback acknowledgement guard is not loaded."
+
+$forbiddenIndexPatterns = @(
+    "proactive-sales",
+    "proactive-tts-auto-patch",
+    "woodfloor_proactive_sales_enabled",
+    "__WOODFLOOR_PROACTIVE_BOOTSTRAP_VERSION__"
+)
+foreach ($pattern in $forbiddenIndexPatterns) {
+    if ($index.Contains($pattern)) {
+        throw "Office frontend still contains proactive narration UI/runtime: $pattern"
+    }
 }
-if ($main.IndexOf("import './realtimePlaybackAck'") -lt $main.IndexOf("import './realtimeOutputCircuitBreaker'")) {
-    throw "The playback acknowledgement guard must wrap the completed Realtime/circuit-breaker fetch chain."
+
+$removedFiles = @(
+    $RemovedCircuitSource,
+    $RemovedAckSource,
+    $RemovedProactivePatch,
+    $RemovedProactiveRuntime
+)
+foreach ($path in $removedFiles) {
+    if (Test-Path $path) {
+        throw "Removed office-only voice/proactive file still exists: $path"
+    }
 }
 
 $routerPatterns = @(
@@ -146,15 +165,13 @@ if (-not $interactionApi.Contains('@router.post("/api/interaction/route")')) {
     throw "The routed interaction-execution endpoint is not registered."
 }
 
-$legacyPerTurnPattern = "new RTCPeerConnection"
-if ($recognition.Contains($legacyPerTurnPattern)) {
+if ($recognition.Contains("new RTCPeerConnection")) {
     throw "SpeechRecognition wrapper still constructs a per-turn WebRTC connection."
 }
 
-Write-Host "Persistent GPT Realtime frontend and routing contracts passed." -ForegroundColor Green
+Write-Host "Strict office voice-output contracts passed." -ForegroundColor Green
 Write-Host "Model configured: $($status.model)"
-Write-Host "The physical microphone is push-to-talk only; the idle sender track is detached after negotiation."
-Write-Host "Interrupted Realtime social responses cannot silently fall through to Terra."
-Write-Host "Terra execution starts concurrently with a short Realtime progress cue."
-Write-Host "Realtime playback returns a valid silent acknowledgement, preventing duplicate Kokoro/Browser TTS fallback."
-Write-Host "GPT Realtime is the default output; Kokoro remains user-selectable and a 60-second circuit breaker prevents repeated failed Realtime attempts."
+Write-Host "Proactive narration runtime and its frontend dock are absent from the office branch."
+Write-Host "The user selects exactly one output owner: GPT Realtime 2, Kokoro, or OpenAI TTS."
+Write-Host "Provider errors remain visible and do not trigger another voice or browser TTS."
+Write-Host "Only one HTML media element may play at a time; push-to-talk still owns microphone interruption."
