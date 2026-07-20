@@ -1,9 +1,8 @@
-import { getRealtimeAgentRuntime } from './realtimeAgentRuntime'
+import { getRealtimeAgentRuntime, type RealtimeAgentRuntime } from './realtimeAgentRuntime'
+import { getVoiceOutputMode } from './voiceOutputManager'
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? 'http://127.0.0.1:8000'
-const VOICE_OUTPUT_KEY = 'woodfloor_voice_output'
-const REALTIME_OUTPUT = 'realtime'
 
 type RoutePayload = {
   answer?: string
@@ -11,7 +10,17 @@ type RoutePayload = {
   route_intent?: string
   route_reason?: string
   realtime_instruction?: string | null
+  audio_already_played?: boolean
   [key: string]: unknown
+}
+
+type RealtimeTextInternals = RealtimeAgentRuntime & {
+  ensureConnected: () => Promise<void>
+  createResponse: (
+    modalities: Array<'text' | 'audio'>,
+    instructions: string,
+    purpose: string,
+  ) => Promise<string>
 }
 
 function requestUrl(input: RequestInfo | URL): string {
@@ -35,53 +44,48 @@ function jsonResponse(payload: unknown): Response {
   })
 }
 
-function silentWavResponse(): Response {
-  const bytes = new Uint8Array([
-    82, 73, 70, 70, 36, 0, 0, 0, 87, 65, 86, 69, 102, 109, 116, 32,
-    16, 0, 0, 0, 1, 0, 1, 0, 128, 62, 0, 0, 0, 125, 0, 0,
-    2, 0, 16, 0, 100, 97, 116, 97, 0, 0, 0, 0,
-  ])
-  return new Response(bytes, {
-    status: 200,
-    headers: {
-      'Content-Type': 'audio/wav',
-      'Cache-Control': 'no-store',
-      'X-TTS-Provider': 'gpt-realtime',
-    },
-  })
-}
-
 function selectedLanguage(): 'zh' | 'en' {
   const configured = (window as Window & { __WOODFLOOR_LANGUAGE__?: string }).__WOODFLOOR_LANGUAGE__
   return configured === 'en' || localStorage.getItem('woodfloor_ui_language') === 'en' ? 'en' : 'zh'
 }
 
-function kokoroSmalltalkFallback(text: string): string {
-  const normalized = text.toLowerCase()
-  if (selectedLanguage() === 'en') {
-    if (normalized.includes('nice to meet')) return 'It is nice to meet you too. Please continue at your own pace.'
-    if (normalized.includes('hear me')) return 'Yes, I can hear you. In a noisy venue, please stay close to the microphone and finish the sentence before releasing the button.'
-    if (normalized.includes('sound')) return 'Thank you. I will keep my voice natural, clear, and concise.'
-    return 'I am listening. Please continue.'
-  }
-  if (normalized.includes('见到你很高兴')) return '我也很高兴见到您。您可以按自己的节奏继续聊。'
-  if (normalized.includes('听清') || normalized.includes('听见') || normalized.includes('吵') || normalized.includes('嘈杂')) {
-    return '可以听到。展会环境较吵时，请靠近麦克风，并按住说话按钮完整说完。'
-  }
-  if (normalized.includes('说话')) return '谢谢，我会尽量保持自然、清楚，也会控制回答长度。'
-  return '我在听，您可以继续说。'
+function directPrompt(userText: string, instruction?: string | null): string {
+  return [
+    selectedLanguage() === 'en'
+      ? 'You are Xiao Mu, the voice consultant at Senjing Flooring Living Gallery.'
+      : '你是森境地板生活馆的语音顾问“小木”。',
+    instruction ?? '',
+    selectedLanguage() === 'en'
+      ? `The user's normalized utterance is: ${userText}`
+      : `用户最终确认的话是：${userText}`,
+    selectedLanguage() === 'en'
+      ? 'Return only the final answer text in no more than two short sentences. Do not produce audio.'
+      : '只返回最终回答文本，最多两句，保持简短自然。不要输出音频。',
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
-function progressCue(): string {
-  return selectedLanguage() === 'en'
-    ? 'Okay, I am checking the relevant information now.'
-    : '好的，我正在核对相关信息。'
+async function respondDirectText(
+  runtime: RealtimeAgentRuntime,
+  userText: string,
+  instruction?: string | null,
+): Promise<string> {
+  const internals = runtime as RealtimeTextInternals
+  if (typeof internals.ensureConnected !== 'function' || typeof internals.createResponse !== 'function') {
+    throw new Error('GPT Realtime text response capability is unavailable.')
+  }
+  await internals.ensureConnected()
+  return await internals.createResponse(
+    ['text'],
+    directPrompt(userText, instruction),
+    'realtime_direct_text',
+  )
 }
 
 const previousFetch = window.fetch.bind(window)
 const agent = getRealtimeAgentRuntime()
 let lastAnswer = ''
-let skipNextTtsText = ''
 let listeningGeneration = 0
 
 window.addEventListener('woodfloor:realtime-listening-start', () => {
@@ -105,15 +109,6 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
   const url = requestUrl(input)
   const body = parseBody(init)
 
-  if (url.includes('/api/tts') && typeof body?.text === 'string') {
-    const text = String(body.text).trim()
-    if (skipNextTtsText && text === skipNextTtsText) {
-      skipNextTtsText = ''
-      return silentWavResponse()
-    }
-    return await previousFetch(input, init)
-  }
-
   if (!url.includes('/api/chat') || typeof body?.text !== 'string') {
     return await previousFetch(input, init)
   }
@@ -126,20 +121,10 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
     const route = payload.response_route ?? 'terra'
 
     if (route === 'terra') {
-      // Begin guarded business work immediately. While it runs, Realtime gives a
-      // short progress cue so the visitor does not face several seconds of silence.
-      const executionPromise = fetchRoute('route', body)
-      if ((localStorage.getItem(VOICE_OUTPUT_KEY) ?? REALTIME_OUTPUT) === REALTIME_OUTPUT) {
-        try {
-          await agent.speakExact(progressCue())
-        } catch (error) {
-          const interrupted =
-            listeningGeneration !== generationAtStart ||
-            (error instanceof Error && error.name === 'AbortError')
-          if (!interrupted) console.warn('Realtime progress cue could not play:', error)
-        }
-      }
-      payload = await executionPromise
+      // No spoken progress cue: the selected voice provider owns the entire turn.
+      // The UI already displays its normal visual processing indicator while the
+      // guarded Terra/Qwen execution is running.
+      payload = await fetchRoute('route', body)
     } else if (route === 'repeat_last') {
       payload.answer =
         lastAnswer ||
@@ -147,9 +132,10 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
           ? 'There is no previous answer to repeat yet.'
           : '目前还没有上一条答复可以重复。')
     } else if (route === 'realtime_direct') {
-      if ((localStorage.getItem(VOICE_OUTPUT_KEY) ?? REALTIME_OUTPUT) === REALTIME_OUTPUT) {
+      const userText = String(body.text)
+      if (getVoiceOutputMode() === 'realtime') {
         try {
-          payload.answer = await agent.respondDirect(String(body.text), payload.realtime_instruction)
+          payload.answer = await agent.respondDirect(userText, payload.realtime_instruction)
         } catch (error) {
           const interrupted =
             listeningGeneration !== generationAtStart ||
@@ -158,14 +144,21 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
           payload.answer = ''
         }
         if (listeningGeneration !== generationAtStart) payload.answer = ''
-        const directAnswer = String(payload.answer ?? '').trim()
-        if (directAnswer) skipNextTtsText = directAnswer
+        const answer = String(payload.answer ?? '').trim()
+        if (answer) {
+          payload.audio_already_played = true
+          window.dispatchEvent(
+            new CustomEvent('woodfloor:voice-output-played', {
+              detail: { text: answer, provider: 'gpt-realtime' },
+            }),
+          )
+        }
       } else {
-        // The user explicitly selected Kokoro output. Keep Realtime as the input
-        // understanding layer, but provide a safe short text for Kokoro to read.
-        payload.answer = kokoroSmalltalkFallback(String(body.text))
+        payload.answer = await respondDirectText(agent, userText, payload.realtime_instruction)
+        payload.audio_already_played = false
       }
     } else if (route === 'stop_speaking') {
+      window.dispatchEvent(new CustomEvent('woodfloor:voice-output-stop'))
       await agent.stopOutput()
     }
 
@@ -175,6 +168,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
       route,
       intent: payload.route_intent,
       reason: payload.route_reason,
+      output_mode: getVoiceOutputMode(),
       classify_ms: classifyMs,
       total_ms: Math.round(performance.now() - startedAt),
     })
