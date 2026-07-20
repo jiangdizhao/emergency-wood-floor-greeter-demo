@@ -5,6 +5,7 @@ import './voice.css'
 import './speechRecognitionDomainPatch'
 import './routedInteractionGuard'
 import './voiceOutputManager'
+import './openAiTtsVoiceNormalizer'
 import './asrModeControl'
 import App from './App.tsx'
 
