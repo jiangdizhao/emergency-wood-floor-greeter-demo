@@ -9,6 +9,7 @@ $RuntimeSource = Join-Path $RepoRoot 'ui\src\realtimeAgentRuntime.ts'
 $RecognitionSource = Join-Path $RepoRoot 'ui\src\realtimeSpeechRecognitionV2.ts'
 $RouteGuardSource = Join-Path $RepoRoot 'ui\src\routedInteractionGuard.ts'
 $CircuitSource = Join-Path $RepoRoot 'ui\src\realtimeOutputCircuitBreaker.ts'
+$PlaybackAckSource = Join-Path $RepoRoot 'ui\src\realtimePlaybackAck.ts'
 $MainSource = Join-Path $RepoRoot 'ui\src\main.tsx'
 $RouterSource = Join-Path $BackendRoot 'app\services\turn_router.py'
 $InteractionApiSource = Join-Path $BackendRoot 'app\interaction_api.py'
@@ -24,6 +25,7 @@ $runtime = Get-Content -Raw -Encoding UTF8 $RuntimeSource
 $recognition = Get-Content -Raw -Encoding UTF8 $RecognitionSource
 $routeGuard = Get-Content -Raw -Encoding UTF8 $RouteGuardSource
 $circuit = Get-Content -Raw -Encoding UTF8 $CircuitSource
+$playbackAck = Get-Content -Raw -Encoding UTF8 $PlaybackAckSource
 $main = Get-Content -Raw -Encoding UTF8 $MainSource
 $router = Get-Content -Raw -Encoding UTF8 $RouterSource
 $interactionApi = Get-Content -Raw -Encoding UTF8 $InteractionApiSource
@@ -95,11 +97,32 @@ foreach ($pattern in $circuitPatterns) {
         throw "Missing Realtime output circuit-breaker contract: $pattern"
     }
 }
+
+$playbackAckPatterns = @(
+    "ACK_DURATION_MS = 80",
+    "createPlayableSilenceWav",
+    "view.setUint32(40, dataSize, true)",
+    "X-Woodfloor-Audio-Already-Played",
+    "provider === REALTIME_PROVIDER",
+    "return playableRealtimeAck(response)"
+)
+foreach ($pattern in $playbackAckPatterns) {
+    if (-not $playbackAck.Contains($pattern)) {
+        throw "Missing single-playback Realtime acknowledgement contract: $pattern"
+    }
+}
+
 if (-not $main.Contains("import './routedInteractionGuard'")) {
     throw "The authoritative routed interaction guard is not loaded."
 }
 if (-not $main.Contains("import './realtimeOutputCircuitBreaker'")) {
     throw "The Realtime output circuit breaker is not loaded after the runtime."
+}
+if (-not $main.Contains("import './realtimePlaybackAck'")) {
+    throw "The Realtime playback acknowledgement guard is not loaded."
+}
+if ($main.IndexOf("import './realtimePlaybackAck'") -lt $main.IndexOf("import './realtimeOutputCircuitBreaker'")) {
+    throw "The playback acknowledgement guard must wrap the completed Realtime/circuit-breaker fetch chain."
 }
 
 $routerPatterns = @(
@@ -133,4 +156,5 @@ Write-Host "Model configured: $($status.model)"
 Write-Host "The physical microphone is push-to-talk only; the idle sender track is detached after negotiation."
 Write-Host "Interrupted Realtime social responses cannot silently fall through to Terra."
 Write-Host "Terra execution starts concurrently with a short Realtime progress cue."
+Write-Host "Realtime playback returns a valid silent acknowledgement, preventing duplicate Kokoro/Browser TTS fallback."
 Write-Host "GPT Realtime is the default output; Kokoro remains user-selectable and a 60-second circuit breaker prevents repeated failed Realtime attempts."
