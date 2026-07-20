@@ -80,6 +80,20 @@ Terra processing uses the visual processing indicator only. There is no spoken R
 6. The physical microphone is stopped and the sender track is detached again.
 7. The same Realtime session is reused for the next turn.
 
+## Long GPT Realtime speech
+
+`ui/src/realtimeLongAudioTimeoutPatch.ts` replaces the old fixed 30-second total response timeout for audio turns.
+
+- Text-only Realtime operations keep a 30-second timeout.
+- Audio must begin within 15 seconds.
+- Once `output_audio_buffer.started` is received, the start timer is removed.
+- The completion safety window is estimated from the amount of Chinese text and English words in the reading instruction.
+- The completion window is never shorter than 90 seconds and is capped at 360 seconds.
+- Normal completion still requires both `response.done` and `output_audio_buffer.stopped`.
+- User interruption, stop commands and voice-mode changes can still cancel playback immediately.
+
+This prevents a normal long welcome message or product explanation from being cancelled after exactly 30 seconds, while retaining a bounded watchdog for genuinely stuck audio.
+
 ## Local validation
 
 ```powershell
@@ -103,19 +117,23 @@ npm run dev -- --host 127.0.0.1
 2. Select GPT Realtime 2 and ask a question.
    - One Realtime voice speaks once.
    - No `/api/tts` audible provider and no browser voice starts.
-3. Select Kokoro and ask a question.
+3. Read a Chinese answer of at least 150 characters.
+   - Audio begins normally and continues beyond 30 seconds when needed.
+   - The UI does not report a timeout while speech is still progressing.
+   - The full final sentence is spoken before playback completes.
+4. Select Kokoro and ask a question.
    - Only `provider=local` is requested.
    - Realtime audio and OpenAI TTS remain silent.
-4. Stop Kokoro and repeat the test.
+5. Stop Kokoro and repeat the test.
    - The answer text remains visible.
    - No Realtime, OpenAI or browser voice starts.
-5. Select OpenAI TTS and ask a question.
+6. Select OpenAI TTS and ask a question.
    - Only `provider=openai` is requested.
-6. Change voice mode during a long answer.
+7. Change voice mode during a long answer.
    - Existing audio stops immediately.
    - No two speakers overlap.
-7. Ask several product questions and then say `能否再介绍一下自己`.
+8. Ask several product questions and then say `能否再介绍一下自己`.
    - Route: `deterministic_direct`.
    - No product recommendation leaks into the identity response.
-8. Complete five voice turns.
+9. Complete five voice turns.
    - The browser normally creates one `/api/realtime/session`, not one per turn.
