@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 $BackendRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $RepoRoot = (Resolve-Path (Join-Path $BackendRoot '..')).Path
 $RuntimeSource = Join-Path $RepoRoot 'ui\src\realtimeAgentRuntime.ts'
+$LongAudioPatchSource = Join-Path $RepoRoot 'ui\src\realtimeLongAudioTimeoutPatch.ts'
 $RecognitionSource = Join-Path $RepoRoot 'ui\src\realtimeSpeechRecognitionV2.ts'
 $RouteGuardSource = Join-Path $RepoRoot 'ui\src\routedInteractionGuard.ts'
 $VoiceManagerSource = Join-Path $RepoRoot 'ui\src\voiceOutputManager.ts'
@@ -23,9 +24,10 @@ Write-Host "Checking strict office voice-output contracts..." -ForegroundColor C
 $status = Invoke-RestMethod -Uri "$BaseUrl/api/realtime/status" -Method Get
 if (-not $status.ok) { throw "Realtime status endpoint did not return ok=true." }
 if ($status.transport -ne "webrtc") { throw "Expected transport=webrtc." }
-if ($status.turn_mode -ne "push_to_talk") { throw "Expected push_to_talk mode." }
+if ($status.turn_mode -ne "push_to_talk") { throw "Expected turn_mode=push_to_talk." }
 
 $runtime = Get-Content -Raw -Encoding UTF8 $RuntimeSource
+$longAudioPatch = Get-Content -Raw -Encoding UTF8 $LongAudioPatchSource
 $recognition = Get-Content -Raw -Encoding UTF8 $RecognitionSource
 $routeGuard = Get-Content -Raw -Encoding UTF8 $RouteGuardSource
 $voiceManager = Get-Content -Raw -Encoding UTF8 $VoiceManagerSource
@@ -48,6 +50,23 @@ $runtimePatterns = @(
 foreach ($pattern in $runtimePatterns) {
     if (-not $runtime.Contains($pattern)) {
         throw "Missing persistent Realtime runtime contract: $pattern"
+    }
+}
+
+$longAudioPatterns = @(
+    "AUDIO_START_TIMEOUT_MS = 15_000",
+    "MIN_AUDIO_COMPLETION_TIMEOUT_MS = 90_000",
+    "MAX_AUDIO_COMPLETION_TIMEOUT_MS = 360_000",
+    "estimateAudioCompletionTimeoutMs",
+    "audioCompletionTimeoutMs",
+    "output_audio_buffer.started",
+    "GPT Realtime audio did not start within 15 seconds.",
+    "createResponseWithAudioAwareTimeout",
+    "handleServerEventWithAudioAwareTimeout"
+)
+foreach ($pattern in $longAudioPatterns) {
+    if (-not $longAudioPatch.Contains($pattern)) {
+        throw "Missing long Realtime audio timeout contract: $pattern"
     }
 }
 
@@ -113,6 +132,12 @@ foreach ($pattern in $voiceManagerPatterns) {
     }
 }
 
+if (-not $main.Contains("import './realtimeLongAudioTimeoutPatch'")) {
+    throw "The long Realtime audio timeout patch is not loaded."
+}
+if ($main.IndexOf("import './realtimeLongAudioTimeoutPatch'") -lt $main.IndexOf("import './speechRecognitionDomainPatch'")) {
+    throw "The long audio timeout patch must load after the Realtime runtime is created."
+}
 if (-not $main.Contains("import './voiceOutputManager'")) {
     throw "The strict voice output manager is not loaded."
 }
@@ -174,4 +199,5 @@ Write-Host "Model configured: $($status.model)"
 Write-Host "Proactive narration runtime and its frontend dock are absent from the office branch."
 Write-Host "The user selects exactly one output owner: GPT Realtime 2, Kokoro, or OpenAI TTS."
 Write-Host "Provider errors remain visible and do not trigger another voice or browser TTS."
+Write-Host "Long Realtime audio gets a 15-second start timeout and a 90-360 second completion window."
 Write-Host "Only one HTML media element may play at a time; push-to-talk still owns microphone interruption."
