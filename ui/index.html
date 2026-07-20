@@ -38,106 +38,18 @@
         color: white;
       }
 
-      .utility-entry[hidden],
-      .proactive-sales-dock[hidden],
-      .proactive-sales-contact[hidden] {
+      .utility-entry[hidden] {
         display: none;
       }
 
-      .utility-entry:hover,
-      .proactive-sales-contact:hover,
-      .proactive-sales-toggle:hover {
+      .utility-entry:hover {
         transform: translateY(-1px);
-      }
-
-      .proactive-sales-dock {
-        position: fixed;
-        z-index: 79;
-        right: 18px;
-        bottom: 72px;
-        width: min(430px, calc(100vw - 36px));
-        padding: 15px 16px 16px;
-        border: 1px solid rgba(132, 84, 57, 0.2);
-        border-radius: 19px;
-        background: rgba(255, 252, 247, 0.97);
-        box-shadow: 0 18px 48px rgba(66, 42, 29, 0.18);
-        color: #4f382d;
-        font-family: Inter, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
-        backdrop-filter: blur(14px);
-        opacity: 0;
-        transform: translateY(10px);
-        transition: opacity 180ms ease, transform 180ms ease;
-      }
-
-      .proactive-sales-dock.visible {
-        opacity: 1;
-        transform: translateY(0);
-      }
-
-      .proactive-sales-heading {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-
-      .proactive-sales-heading strong {
-        flex: 1;
-        color: #704632;
-        font-size: 13px;
-      }
-
-      .proactive-sales-pulse {
-        width: 9px;
-        height: 9px;
-        border-radius: 50%;
-        background: #b86d43;
-        box-shadow: 0 0 0 5px rgba(184, 109, 67, 0.13);
-      }
-
-      .proactive-sales-toggle {
-        padding: 5px 9px;
-        border: 1px solid rgba(124, 79, 53, 0.18);
-        border-radius: 999px;
-        background: #fffaf5;
-        color: #83614e;
-        cursor: pointer;
-        font: inherit;
-        font-size: 11px;
-        font-weight: 750;
-      }
-
-      .proactive-sales-text {
-        margin: 12px 0 0;
-        color: #665044;
-        font-size: 14px;
-        line-height: 1.68;
-      }
-
-      .proactive-sales-contact {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-height: 38px;
-        margin-top: 12px;
-        padding: 8px 13px;
-        border-radius: 11px;
-        background: linear-gradient(135deg, #9c5d3c, #713a26);
-        color: white;
-        font-size: 12px;
-        font-weight: 800;
-        text-decoration: none;
       }
 
       @media (max-width: 640px) {
         .utility-entry-dock {
           right: 10px;
           bottom: 10px;
-        }
-
-        .proactive-sales-dock {
-          right: 10px;
-          bottom: 68px;
-          width: calc(100vw - 20px);
         }
       }
     </style>
@@ -210,19 +122,6 @@
         })
       })()
     </script>
-    <script>
-      (() => {
-        // A paused state used to persist in localStorage while the only Resume button
-        // lived inside a dock that stayed hidden until narration ran. That created a
-        // permanent deadlock after refresh: disabled narration, hidden dock, no way to
-        // resume. Proactive guidance now starts enabled on every page load; pausing is
-        // limited to the current loaded page and can still be resumed from the dock.
-        localStorage.removeItem('woodfloor_proactive_sales_enabled')
-        window.__WOODFLOOR_PROACTIVE_BOOTSTRAP_VERSION__ = '2026-07-14.3'
-      })()
-    </script>
-    <script src="/proactive-tts-auto-patch.js?v=20260719-1"></script>
-    <script src="/proactive-sales.js?v=20260714-3"></script>
   </head>
   <body>
     <div id="root"></div>
