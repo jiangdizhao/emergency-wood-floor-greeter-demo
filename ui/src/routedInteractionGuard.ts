@@ -3,6 +3,7 @@ import { getVoiceOutputMode } from './voiceOutputManager'
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? 'http://127.0.0.1:8000'
+const REPLAY_MARKER = '\u2060'
 
 type RoutePayload = {
   answer?: string
@@ -126,11 +127,14 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
       // guarded Terra/Qwen execution is running.
       payload = await fetchRoute('route', body)
     } else if (route === 'repeat_last') {
-      payload.answer =
+      const replayText =
         lastAnswer ||
         (selectedLanguage() === 'en'
           ? 'There is no previous answer to repeat yet.'
           : '目前还没有上一条答复可以重复。')
+      // A word-joiner is visually and audibly empty, but makes an intentional
+      // repeat distinct from an immediate legacy fallback retry of the same text.
+      payload.answer = `${replayText}${REPLAY_MARKER}`
     } else if (route === 'realtime_direct') {
       const userText = String(body.text)
       if (getVoiceOutputMode() === 'realtime') {
@@ -163,7 +167,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
     }
 
     const answer = String(payload.answer ?? '').trim()
-    if (answer) lastAnswer = answer
+    if (answer) lastAnswer = answer.replace(/\u2060+$/u, '')
     console.info('[voice-route]', {
       route,
       intent: payload.route_intent,
