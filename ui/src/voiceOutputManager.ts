@@ -126,8 +126,8 @@ function isRecentDuplicate(text: string): boolean {
   )
 }
 
-async function stopAllOutput(): Promise<void> {
-  outputGeneration += 1
+async function stopAllOutput(invalidate = true): Promise<void> {
+  if (invalidate) outputGeneration += 1
   await agent.stopOutput().catch(() => undefined)
   if (activeMedia) {
     activeMedia.pause()
@@ -150,9 +150,10 @@ window.addEventListener('woodfloor:voice-output-stop', () => {
 })
 
 function installSingleMediaOwner(): void {
-  const prototype = HTMLMediaElement.prototype as HTMLMediaElement & {
+  type MediaPrototype = typeof HTMLMediaElement.prototype & {
     __woodfloorOriginalPlay?: typeof HTMLMediaElement.prototype.play
   }
+  const prototype = HTMLMediaElement.prototype as MediaPrototype
   if (prototype.__woodfloorOriginalPlay) return
   const originalPlay = HTMLMediaElement.prototype.play
   Object.defineProperty(prototype, '__woodfloorOriginalPlay', {
@@ -202,17 +203,20 @@ function ensureVoiceControl(): void {
   const select = control?.querySelector<HTMLSelectElement>('select')
   if (!control || !select) return
 
-  select.innerHTML = ''
-  const options: Array<{ value: VoiceOutputMode; zh: string; en: string }> = [
-    { value: REALTIME_MODE, zh: 'GPT Realtime 2（默认）', en: 'GPT Realtime 2 (default)' },
-    { value: KOKORO_MODE, zh: 'Kokoro 本地语音', en: 'Kokoro local voice' },
-    { value: OPENAI_MODE, zh: 'OpenAI TTS', en: 'OpenAI TTS' },
-  ]
-  for (const option of options) {
-    const node = document.createElement('option')
-    node.value = option.value
-    node.textContent = selectedLanguage() === 'en' ? option.en : option.zh
-    select.appendChild(node)
+  if (select.dataset.strictVoiceOptions !== '1') {
+    select.innerHTML = ''
+    const options: Array<{ value: VoiceOutputMode; zh: string; en: string }> = [
+      { value: REALTIME_MODE, zh: 'GPT Realtime 2（默认）', en: 'GPT Realtime 2 (default)' },
+      { value: KOKORO_MODE, zh: 'Kokoro 本地语音', en: 'Kokoro local voice' },
+      { value: OPENAI_MODE, zh: 'OpenAI TTS', en: 'OpenAI TTS' },
+    ]
+    for (const option of options) {
+      const node = document.createElement('option')
+      node.value = option.value
+      node.textContent = selectedLanguage() === 'en' ? option.en : option.zh
+      select.appendChild(node)
+    }
+    select.dataset.strictVoiceOptions = '1'
   }
   select.value = getVoiceOutputMode()
 
@@ -222,6 +226,8 @@ function ensureVoiceControl(): void {
       const next = select.value as VoiceOutputMode
       if (![REALTIME_MODE, KOKORO_MODE, OPENAI_MODE].includes(next)) return
       localStorage.setItem(VOICE_OUTPUT_KEY, next)
+      recentText = ''
+      recentResult = null
       void stopAllOutput()
       setStatus(
         selectedLanguage() === 'en'
@@ -238,11 +244,11 @@ function ensureVoiceControl(): void {
     state.id = STATUS_ID
     state.style.cssText = 'max-width:210px;font-size:11px;font-weight:650;line-height:1.25;color:#6c8b71'
     control.appendChild(state)
+    state.textContent =
+      selectedLanguage() === 'en'
+        ? `${modeLabel(getVoiceOutputMode())}; no automatic fallback`
+        : `${modeLabel(getVoiceOutputMode())}；不自动切换`
   }
-  state.textContent =
-    selectedLanguage() === 'en'
-      ? `${modeLabel(getVoiceOutputMode())}; no automatic fallback`
-      : `${modeLabel(getVoiceOutputMode())}；不自动切换`
 }
 
 function installVoiceControlObserver(): void {
@@ -260,7 +266,6 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
 
   const text = String(body.text).trim()
   const mode = getVoiceOutputMode()
-  const requestGeneration = ++outputGeneration
 
   if (!text) return acknowledgementResponse(mode)
 
@@ -271,8 +276,10 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
     )
   }
 
+  const requestGeneration = ++outputGeneration
+  await stopAllOutput(false)
+
   if (mode === REALTIME_MODE) {
-    await stopAllOutput()
     try {
       await agent.speakExact(text)
       if (requestGeneration !== outputGeneration) return acknowledgementResponse('gpt-realtime')
@@ -284,8 +291,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
       markResult(text, 'failed')
       setStatus(
         selectedLanguage() === 'en'
-          ? `GPT Realtime 2 failed. Text remains visible; no fallback was used.`
-          : `GPT Realtime 2 播放失败。文字已保留，未自动切换发音人。`,
+          ? 'GPT Realtime 2 failed. Text remains visible; no fallback was used.'
+          : 'GPT Realtime 2 播放失败。文字已保留，未自动切换发音人。',
         true,
       )
       console.error('Strict GPT Realtime output failed:', message)
