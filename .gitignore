@@ -28,3 +28,8 @@ dist/
 Thumbs.db
 .vscode/
 .idea/
+
+
+#ignore docx
+docs/*.txt
+docs/*.docx
